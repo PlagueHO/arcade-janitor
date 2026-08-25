@@ -29,7 +29,7 @@ use mcp_core_rs::{
 };
 use mcp_error_rs::{Error as McpError, Result as McpResult};
 use mcp_server_rs::router::{capabilities::CapabilitiesBuilder, traits::Router as McpRouter};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
@@ -100,9 +100,9 @@ async fn handle_socket(mut socket: WebSocket, router: CleanMameRouter) {
         let Message::Text(text) = message else {
             continue;
         };
-        let response = match serde_json::from_str::<JsonRpcRequest>(&text) {
-            Ok(request) => handle_request(router.clone(), request).await,
-            Err(error) => Some(rpc_error(None, -32700, error.to_string())),
+        let response = match serde_json::from_str::<WireRequest>(&text) {
+            Ok(request) => handle_wire_request(router.clone(), request).await,
+            Err(error) => Some(wire_error(None, -32700, error.to_string())),
         };
         if let Some(response) = response
             && socket
@@ -120,9 +120,13 @@ async fn handle_socket(mut socket: WebSocket, router: CleanMameRouter) {
 async fn mcp_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<JsonRpcRequest>,
+    Json(request): Json<Value>,
 ) -> Response {
-    match handle_request(router_for_request(&state, &headers), request).await {
+    let request = match serde_json::from_value::<WireRequest>(request) {
+        Ok(request) => request,
+        Err(error) => return Json(wire_error(None, -32600, error.to_string())).into_response(),
+    };
+    match handle_wire_request(router_for_request(&state, &headers), request).await {
         Some(response) => Json(response).into_response(),
         None => StatusCode::ACCEPTED.into_response(),
     }
@@ -182,6 +186,76 @@ async fn handle_request(
         Ok(response) => Some(response),
         Err(McpError::InvalidParameters(message)) => Some(rpc_error(Some(id), -32602, message)),
         Err(error) => Some(rpc_error(Some(id), -32603, error.to_string())),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct WireRequest {
+    jsonrpc: String,
+    id: Option<WireId>,
+    method: String,
+    params: Option<Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(untagged)]
+enum WireId {
+    Number(u64),
+    String(String),
+}
+
+#[derive(Debug, Serialize)]
+struct WireResponse {
+    jsonrpc: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<WireId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<ErrorData>,
+}
+
+async fn handle_wire_request(
+    router: CleanMameRouter,
+    request: WireRequest,
+) -> Option<WireResponse> {
+    let id = request.id.clone()?;
+    if request.method == "ping" {
+        return Some(WireResponse {
+            jsonrpc: request.jsonrpc,
+            id: Some(id),
+            result: Some(json!({})),
+            error: None,
+        });
+    }
+
+    let sdk_id = match &id {
+        WireId::Number(id) => *id,
+        WireId::String(_) => 0,
+    };
+    let response = handle_request(
+        router,
+        JsonRpcRequest::new(Some(sdk_id), request.method, request.params),
+    )
+    .await?;
+    Some(WireResponse {
+        jsonrpc: response.jsonrpc,
+        id: Some(id),
+        result: response.result,
+        error: response.error,
+    })
+}
+
+fn wire_error(id: Option<WireId>, code: i32, message: impl Into<String>) -> WireResponse {
+    WireResponse {
+        jsonrpc: "2.0".to_string(),
+        id,
+        result: None,
+        error: Some(ErrorData {
+            code,
+            message: message.into(),
+            data: None,
+        }),
     }
 }
 
@@ -510,6 +584,7 @@ fn delete_schema() -> Value {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MetadataArgs {
     rom_folder: PathBuf,
     mame_xml: PathBuf,
@@ -517,6 +592,7 @@ struct MetadataArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct QueryArgs {
     name: String,
     mame_xml: PathBuf,
@@ -524,6 +600,7 @@ struct QueryArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FilterArgs {
     metadata: MetadataArgs,
     #[serde(default)]
@@ -531,6 +608,7 @@ struct FilterArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MoveArgs {
     filter: FilterArgs,
     target_folder: PathBuf,
@@ -539,6 +617,7 @@ struct MoveArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeleteArgs {
     filter: FilterArgs,
     #[serde(default)]
@@ -581,7 +660,10 @@ mod tests {
         let response = mcp_handler(
             State(AppState { auth_token: None }),
             HeaderMap::new(),
-            Json(JsonRpcRequest::new(None, "notifications/initialized", None)),
+            Json(json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            })),
         )
         .await;
 

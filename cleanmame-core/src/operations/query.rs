@@ -57,6 +57,7 @@ pub fn scan_rom_folder_with_entries(
                 roms[*index].rom_path = Some(path);
             } else {
                 let mut entry = RomEntry::new(&name);
+                entry.metadata.flags.runnable = false;
                 entry.rom_path = Some(path);
                 by_name.insert(name, roms.len());
                 roms.push(entry);
