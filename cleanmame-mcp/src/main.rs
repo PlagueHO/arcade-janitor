@@ -100,7 +100,7 @@ async fn handle_request(
     router: CleanMameRouter,
     request: JsonRpcRequest,
 ) -> Option<JsonRpcResponse> {
-    if request.method == "notifications/initialized" {
+    if request.method.starts_with("notifications/") {
         return None;
     }
     let id = request.id?;

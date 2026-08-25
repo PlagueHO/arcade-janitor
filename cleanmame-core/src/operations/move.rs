@@ -45,7 +45,10 @@ fn move_file(source: &Path, target: &Path) -> Result<()> {
         .map_err(|error| io_error(target, error))?;
 
     match fs::rename(source, target) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            drop(reservation);
+            Ok(())
+        }
         Err(_rename_error) => {
             let result = (|| {
                 let mut source_file =

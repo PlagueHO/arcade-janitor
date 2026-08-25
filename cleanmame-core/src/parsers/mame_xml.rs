@@ -1,9 +1,6 @@
 use std::{fs, path::Path};
 
-use quick_xml::{
-    Reader,
-    events::{BytesStart, Event},
-};
+use quick_xml::{Reader, events::Event};
 
 use crate::{CleanMameError, Result, errors::io_error, models::RomEntry};
 
@@ -54,21 +51,8 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                     "description" => Some(Field::Description),
                     "year" => Some(Field::Year),
                     "manufacturer" => Some(Field::Manufacturer),
-                    "driver" => Some(Field::Driver),
                     _ => None,
                 };
-
-                if current_field == Some(Field::Driver) {
-                    if let Some(entry) = current.as_mut() {
-                        apply_driver_flags(&element, entry)?;
-                    }
-                    current_field = None;
-                }
-            }
-            Ok(Event::Empty(element)) if element.name().as_ref() == "driver" => {
-                if let Some(entry) = current.as_mut() {
-                    apply_driver_flags(&element, entry)?;
-                }
             }
             Ok(Event::Text(text)) => {
                 if let (Some(entry), Some(field)) = (current.as_mut(), current_field) {
@@ -110,7 +94,7 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
             Ok(Event::End(element))
                 if matches!(
                     element.name().as_ref(),
-                    "description" | "year" | "manufacturer" | "driver"
+                    "description" | "year" | "manufacturer"
                 ) =>
             {
                 current_field = None;
@@ -126,13 +110,8 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
             Field::Description => &mut entry.description,
             Field::Year => &mut entry.year,
             Field::Manufacturer => &mut entry.manufacturer,
-            Field::Driver => return,
         };
         target.get_or_insert_default().push_str(value);
-    }
-
-    fn apply_driver_flags(_element: &BytesStart<'_>, _entry: &mut RomEntry) -> Result<()> {
-        Ok(())
     }
 
     Ok(entries)
@@ -148,7 +127,6 @@ enum Field {
     Description,
     Year,
     Manufacturer,
-    Driver,
 }
 
 #[cfg(test)]
