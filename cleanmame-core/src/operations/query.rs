@@ -3,7 +3,10 @@ use std::{collections::HashMap, path::Path};
 use crate::{
     Result,
     models::{Genre, RomEntry},
-    parsers::{catver::parse_catver_file, mame_xml::parse_mame_xml_file},
+    parsers::{
+        catver::parse_catver_file,
+        mame_xml::{parse_mame_xml_file, parse_mame_xml_str},
+    },
     utils::{filesystem::list_rom_files, paths::rom_name_from_path},
 };
 
@@ -18,12 +21,30 @@ pub fn load_metadata(
     Ok(roms)
 }
 
+pub fn load_metadata_from_str(
+    mame_xml: &str,
+    catver: Option<impl AsRef<Path>>,
+) -> Result<Vec<RomEntry>> {
+    let mut roms = parse_mame_xml_str(mame_xml)?;
+    if let Some(catver) = catver {
+        apply_genres(&mut roms, &parse_catver_file(catver)?);
+    }
+    Ok(roms)
+}
+
 pub fn scan_rom_folder(
     rom_folder: impl AsRef<Path>,
     mame_xml: impl AsRef<Path>,
     catver: Option<impl AsRef<Path>>,
 ) -> Result<Vec<RomEntry>> {
-    let mut roms = load_metadata(mame_xml, catver)?;
+    let roms = load_metadata(mame_xml, catver)?;
+    scan_rom_folder_with_entries(rom_folder, roms)
+}
+
+pub fn scan_rom_folder_with_entries(
+    rom_folder: impl AsRef<Path>,
+    mut roms: Vec<RomEntry>,
+) -> Result<Vec<RomEntry>> {
     let mut by_name: HashMap<String, usize> = roms
         .iter()
         .enumerate()

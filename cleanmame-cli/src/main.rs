@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Command};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -8,7 +8,9 @@ use cleanmame_core::{
         delete::delete_roms,
         filter::{FilterOptions, filter_roms},
         r#move::move_roms,
-        query::{find_by_name, load_metadata, scan_rom_folder},
+        query::{
+            find_by_name, load_metadata, load_metadata_from_str, scan_rom_folder_with_entries,
+        },
         report::generate_report,
     },
 };
@@ -143,8 +145,7 @@ async fn main() -> Result<()> {
             })?;
         }
         Commands::Query(args) => {
-            let xml = xml_path(args.metadata.mame_xml, args.metadata.mame_executable)?;
-            let roms = load_metadata(xml, args.metadata.catver.as_deref())?;
+            let roms = metadata_entries(&args.metadata)?;
             let rom = find_by_name(&roms, &args.name)
                 .with_context(|| format!("ROM '{}' was not found", args.name))?;
             output(args.json, rom, || format_rom(rom))?;
@@ -186,8 +187,12 @@ async fn main() -> Result<()> {
 }
 
 fn scan_from_args(args: &MetadataArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
-    let xml = xml_path(args.mame_xml.clone(), args.mame_executable.clone())?;
-    scan_rom_folder(&args.rom_folder, xml, args.catver.as_deref()).map_err(Into::into)
+    let roms = metadata_entries(&MetadataOnlyArgs {
+        mame_xml: args.mame_xml.clone(),
+        mame_executable: args.mame_executable.clone(),
+        catver: args.catver.clone(),
+    })?;
+    scan_rom_folder_with_entries(&args.rom_folder, roms).map_err(Into::into)
 }
 
 fn filter_from_args(args: &FilterArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
@@ -205,13 +210,30 @@ fn filter_from_args(args: &FilterArgs) -> Result<Vec<cleanmame_core::RomEntry>> 
     ))
 }
 
-fn xml_path(mame_xml: Option<PathBuf>, mame_executable: Option<PathBuf>) -> Result<PathBuf> {
-    if mame_executable.is_some() {
-        bail!(
-            "reading mame.xml from a MAME executable is reserved for a future v1 milestone; pass --mame-xml"
-        )
+fn metadata_entries(args: &MetadataOnlyArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
+    if let Some(mame_xml) = &args.mame_xml {
+        return load_metadata(mame_xml, args.catver.as_deref()).map_err(Into::into);
     }
-    mame_xml.context("--mame-xml is required")
+
+    let executable = args
+        .mame_executable
+        .as_ref()
+        .context("--mame-xml or --mame-executable is required")?;
+    let output = Command::new(executable)
+        .arg("-listxml")
+        .output()
+        .with_context(|| format!("failed to run {} -listxml", executable.display()))?;
+
+    if !output.status.success() {
+        bail!(
+            "{} -listxml exited with {}",
+            executable.display(),
+            output.status
+        );
+    }
+
+    let xml = String::from_utf8(output.stdout).context("MAME -listxml output was not UTF-8")?;
+    load_metadata_from_str(&xml, args.catver.as_deref()).map_err(Into::into)
 }
 
 fn output<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> String) -> Result<()> {
