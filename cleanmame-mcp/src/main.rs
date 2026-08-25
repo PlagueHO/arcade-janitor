@@ -22,11 +22,6 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tracing::info;
 
-// Kept as direct dependencies because the v1 skeleton is expected to include
-// these MCP/stream crates while exposing the initial Axum WebSocket transport.
-use mcp_server_rs as _;
-use tokio_stream as _;
-
 const MCP_SDK_NAME: &str = "mcp-server-rs";
 
 #[derive(Clone)]
@@ -90,7 +85,9 @@ async fn handle_socket(mut socket: WebSocket) {
             continue;
         };
         let response = match serde_json::from_str::<ToolRequest>(&text) {
-            Ok(request) => execute_tool(request),
+            Ok(request) => tokio::task::spawn_blocking(move || execute_tool(request))
+                .await
+                .unwrap_or_else(|error| json!({ "ok": false, "error": error.to_string() })),
             Err(error) => json!({ "ok": false, "error": error.to_string() }),
         };
         if socket
@@ -104,9 +101,16 @@ async fn handle_socket(mut socket: WebSocket) {
 }
 
 async fn call_tool(Json(request): Json<ToolRequest>) -> impl IntoResponse {
-    let response = execute_tool(request);
-    let status = response_status(&response);
-    (status, Json(response))
+    match tokio::task::spawn_blocking(move || execute_tool(request)).await {
+        Ok(response) => {
+            let status = response_status(&response);
+            (status, Json(response))
+        }
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": error.to_string() })),
+        ),
+    }
 }
 
 fn response_status(response: &Value) -> StatusCode {
