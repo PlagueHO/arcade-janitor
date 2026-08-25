@@ -37,9 +37,7 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                                 runnable = false;
                             }
                         }
-                        "cloneof" if value.ends_with("p") || value.contains("proto") => {
-                            prototype = true;
-                        }
+                        "cloneof" if value.contains("proto") => prototype = true,
                         _ => {}
                     }
                 }

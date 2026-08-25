@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use cleanmame_core::operations::{
     filter::{FilterOptions, filter_roms},
@@ -9,18 +13,18 @@ use cleanmame_core::operations::{
 #[test]
 fn scan_filter_and_report_rom_folder() {
     let root = unique_temp_dir();
-    let rom_dir = root.join("roms");
+    let rom_dir = root.path().join("roms");
     fs::create_dir_all(&rom_dir).unwrap();
     fs::write(rom_dir.join("pacman.zip"), "").unwrap();
 
-    let mame_xml = root.join("mame.xml");
+    let mame_xml = root.path().join("mame.xml");
     fs::write(
         &mame_xml,
         r#"<mame><machine name="pacman"><description>Pac-Man (USA)</description><year>1980</year><manufacturer>Namco</manufacturer></machine></mame>"#,
     )
     .unwrap();
 
-    let catver = root.join("catver.ini");
+    let catver = root.path().join("catver.ini");
     fs::write(&catver, "[Category]\npacman=Maze / Chase\n").unwrap();
 
     let roms = scan_rom_folder(&rom_dir, &mame_xml, Some(&catver)).unwrap();
@@ -38,18 +42,34 @@ fn scan_filter_and_report_rom_folder() {
     assert_eq!(filtered[0].name, "pacman");
     assert_eq!(report.total, 1);
     assert_eq!(report.available, 1);
-
-    fs::remove_dir_all(root).unwrap();
 }
 
-fn unique_temp_dir() -> PathBuf {
+struct TestDir(PathBuf);
+
+impl TestDir {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn unique_temp_dir() -> TestDir {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let mut path = std::env::temp_dir();
     path.push(format!(
-        "cleanmame-test-{}",
+        "cleanmame-test-{}-{}-{}",
+        std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
     ));
-    path
+    fs::create_dir_all(&path).unwrap();
+    TestDir(path)
 }

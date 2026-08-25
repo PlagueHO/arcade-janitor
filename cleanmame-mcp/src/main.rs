@@ -20,6 +20,7 @@ use cleanmame_core::operations::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
+use tokio_stream::{self as stream, StreamExt};
 use tracing::info;
 
 #[derive(Clone)]
@@ -47,7 +48,10 @@ async fn main() -> anyhow::Result<()> {
         .parse()?;
 
     let app = Router::new()
-        .route("/health", get(|| async { "ok" }))
+        .route(
+            "/health",
+            get(|| async { format!("ok ({})", mcp_sdk_name()) }),
+        )
         .route("/tools", get(list_tools))
         .route("/tools/call", post(call_tool))
         .route("/ws", get(websocket_handler))
@@ -67,8 +71,7 @@ async fn shutdown_signal() {
 }
 
 async fn list_tools() -> Json<Vec<ToolDefinition>> {
-    let tools = tools();
-    Json(tools)
+    Json(stream::iter(tools()).collect::<Vec<_>>().await)
 }
 
 async fn websocket_handler(
@@ -236,6 +239,10 @@ fn tool(name: &'static str, description: &'static str) -> ToolDefinition {
             "additionalProperties": true
         }),
     }
+}
+
+fn mcp_sdk_name() -> &'static str {
+    std::any::type_name::<mcp_server_rs::server::Server<()>>()
 }
 
 #[derive(Debug, Deserialize)]

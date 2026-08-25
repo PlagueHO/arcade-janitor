@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -15,6 +15,7 @@ use cleanmame_core::{
     },
 };
 use serde::Serialize;
+use tokio::process::Command;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -135,7 +136,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Scan(args) => {
-            let roms = scan_from_args(&args)?;
+            let roms = scan_from_args(&args).await?;
             output(args.json, &roms, || {
                 format!(
                     "Found {} metadata entries, {} available ROM files",
@@ -145,32 +146,32 @@ async fn main() -> Result<()> {
             })?;
         }
         Commands::Query(args) => {
-            let roms = metadata_entries(&args.metadata)?;
+            let roms = metadata_entries(&args.metadata).await?;
             let rom = find_by_name(&roms, &args.name)
                 .with_context(|| format!("ROM '{}' was not found", args.name))?;
             output(args.json, rom, || format_rom(rom))?;
         }
         Commands::Filter(args) => {
             let json = args.metadata.json;
-            let roms = filter_from_args(&args)?;
+            let roms = filter_from_args(&args).await?;
             output(json, &roms, || format_names(&roms))?;
         }
         Commands::Move(args) => {
             let json = args.filter.metadata.json;
-            let roms = filter_from_args(&args.filter)?;
+            let roms = filter_from_args(&args.filter).await?;
             let moved = move_roms(&roms, args.target_folder, args.dry_run)?;
             output(json, &moved, || format!("Moved {} ROM(s)", moved.len()))?;
         }
         Commands::Delete(args) => {
             let json = args.filter.metadata.json;
-            let roms = filter_from_args(&args.filter)?;
+            let roms = filter_from_args(&args.filter).await?;
             let deleted = delete_roms(&roms, args.dry_run)?;
             output(json, &deleted, || {
                 format!("Deleted {} ROM(s)", deleted.len())
             })?;
         }
         Commands::Report(args) => {
-            let roms = scan_from_args(&args)?;
+            let roms = scan_from_args(&args).await?;
             let report = generate_report(&roms);
             output(args.json, &report, || {
                 format!(
@@ -186,17 +187,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn scan_from_args(args: &MetadataArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
+async fn scan_from_args(args: &MetadataArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
     let roms = metadata_entries(&MetadataOnlyArgs {
         mame_xml: args.mame_xml.clone(),
         mame_executable: args.mame_executable.clone(),
         catver: args.catver.clone(),
-    })?;
+    })
+    .await?;
     scan_rom_folder_with_entries(&args.rom_folder, roms).map_err(Into::into)
 }
 
-fn filter_from_args(args: &FilterArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
-    let roms = scan_from_args(&args.metadata)?;
+async fn filter_from_args(args: &FilterArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
+    let roms = scan_from_args(&args.metadata).await?;
     Ok(filter_roms(
         &roms,
         &FilterOptions {
@@ -210,7 +212,7 @@ fn filter_from_args(args: &FilterArgs) -> Result<Vec<cleanmame_core::RomEntry>> 
     ))
 }
 
-fn metadata_entries(args: &MetadataOnlyArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
+async fn metadata_entries(args: &MetadataOnlyArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
     if let Some(mame_xml) = &args.mame_xml {
         return load_metadata(mame_xml, args.catver.as_deref()).map_err(Into::into);
     }
@@ -222,6 +224,7 @@ fn metadata_entries(args: &MetadataOnlyArgs) -> Result<Vec<cleanmame_core::RomEn
     let output = Command::new(executable)
         .arg("-listxml")
         .output()
+        .await
         .with_context(|| format!("failed to run {} -listxml", executable.display()))?;
 
     if !output.status.success() {

@@ -95,10 +95,21 @@ impl Region {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Flags {
     pub mechanical: bool,
     pub mature: bool,
     pub prototype: bool,
     pub runnable: bool,
+}
+
+impl Default for Flags {
+    fn default() -> Self {
+        Self {
+            mechanical: false,
+            mature: false,
+            prototype: false,
+            runnable: true,
+        }
+    }
 }
