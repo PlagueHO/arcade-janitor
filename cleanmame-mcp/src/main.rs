@@ -6,7 +6,7 @@ use axum::{
         WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use cleanmame_core::operations::{
@@ -74,36 +74,46 @@ async fn handle_socket(mut socket: WebSocket) {
         };
         let response = match serde_json::from_str::<JsonRpcRequest>(&text) {
             Ok(request) => handle_request(CleanMameRouter, request).await,
-            Err(error) => rpc_error(None, -32700, error.to_string()),
+            Err(error) => Some(rpc_error(None, -32700, error.to_string())),
         };
-        if socket
-            .send(Message::Text(
-                serde_json::to_string(&response).unwrap_or_default().into(),
-            ))
-            .await
-            .is_err()
+        if let Some(response) = response
+            && socket
+                .send(Message::Text(
+                    serde_json::to_string(&response).unwrap_or_default().into(),
+                ))
+                .await
+                .is_err()
         {
             break;
         }
     }
 }
 
-async fn mcp_handler(Json(request): Json<JsonRpcRequest>) -> Json<JsonRpcResponse> {
-    Json(handle_request(CleanMameRouter, request).await)
+async fn mcp_handler(Json(request): Json<JsonRpcRequest>) -> Response {
+    match handle_request(CleanMameRouter, request).await {
+        Some(response) => Json(response).into_response(),
+        None => ().into_response(),
+    }
 }
 
-async fn handle_request(router: CleanMameRouter, request: JsonRpcRequest) -> JsonRpcResponse {
-    let id = request.id;
+async fn handle_request(
+    router: CleanMameRouter,
+    request: JsonRpcRequest,
+) -> Option<JsonRpcResponse> {
+    if request.method == "notifications/initialized" {
+        return None;
+    }
+    let id = request.id?;
     let result = match request.method.as_str() {
         "initialize" => router.handle_initialize(request).await,
         "tools/list" => router.handle_tools_list(request).await,
         "tools/call" => router.handle_tools_call(request).await,
-        _ => return rpc_error(id, -32601, "method not found"),
+        _ => return Some(rpc_error(Some(id), -32601, "method not found")),
     };
     match result {
-        Ok(response) => response,
-        Err(McpError::InvalidParameters(message)) => rpc_error(id, -32602, message),
-        Err(error) => rpc_error(id, -32603, error.to_string()),
+        Ok(response) => Some(response),
+        Err(McpError::InvalidParameters(message)) => Some(rpc_error(Some(id), -32602, message)),
+        Err(error) => Some(rpc_error(Some(id), -32603, error.to_string())),
     }
 }
 
@@ -221,12 +231,14 @@ fn query_metadata(args: Value) -> Value {
 
 fn filter_roms_tool(args: Value) -> Value {
     match parse_filter_args(args).and_then(|args| {
+        let mut options = args.options;
+        options.only_available = true;
         let roms = scan_rom_folder(
             args.metadata.rom_folder,
             args.metadata.mame_xml,
             args.metadata.catver,
         )?;
-        Ok::<_, anyhow::Error>(filter_roms(&roms, &args.options))
+        Ok::<_, anyhow::Error>(filter_roms(&roms, &options))
     }) {
         Ok(roms) => json!({ "ok": true, "roms": roms }),
         Err(error) => json!({ "ok": false, "error": error.to_string() }),
@@ -463,6 +475,7 @@ mod tests {
             JsonRpcRequest::new(Some(42), "tools/list", None),
         )
         .await;
+        let response = response.unwrap();
         let tools = response.result.unwrap()["tools"]
             .as_array()
             .unwrap()

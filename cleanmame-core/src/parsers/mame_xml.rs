@@ -131,18 +131,7 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
         target.get_or_insert_default().push_str(value);
     }
 
-    fn apply_driver_flags(element: &BytesStart<'_>, entry: &mut RomEntry) -> Result<()> {
-        for attr in element.attributes() {
-            let attr = attr.map_err(|error| CleanMameError::Xml(error.to_string()))?;
-            let value = attr
-                .normalized_value(Default::default())
-                .map_err(|error| CleanMameError::Xml(error.to_string()))?;
-            if matches!(attr.key.as_ref(), "status" | "emulation")
-                && value.eq_ignore_ascii_case("preliminary")
-            {
-                entry.metadata.flags.prototype = true;
-            }
-        }
+    fn apply_driver_flags(_element: &BytesStart<'_>, _entry: &mut RomEntry) -> Result<()> {
         Ok(())
     }
 
@@ -178,6 +167,6 @@ mod tests {
             Some("Pac-Man & Friends (USA)")
         );
         assert!(roms[0].metadata.flags.runnable);
-        assert!(roms[0].metadata.flags.prototype);
+        assert!(!roms[0].metadata.flags.prototype);
     }
 }
