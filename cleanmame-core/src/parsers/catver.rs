@@ -12,7 +12,7 @@ pub fn parse_catver_str(content: &str) -> Result<HashMap<String, Genre>> {
     let parsed = ini::macro_safe_read(content).map_err(CleanMameError::Ini)?;
     let mut genres = HashMap::new();
 
-    if let Some(category) = parsed.get("category") {
+    if let Some(category) = parsed.get("category").or_else(|| parsed.get("Category")) {
         for (rom, value) in category {
             if let Some(genre) = value.as_deref().and_then(Genre::parse) {
                 genres.insert(rom.to_string(), genre);

@@ -24,7 +24,7 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                 let mut name = None;
                 let mut runnable = true;
                 let mut mechanical = false;
-                let mut prototype = false;
+                let prototype = false;
 
                 for attr in element.attributes().flatten() {
                     let value = attr.value.as_ref().to_string();
@@ -32,12 +32,7 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                         "name" => name = Some(value),
                         "runnable" => runnable = value != "no",
                         "ismechanical" => mechanical = value == "yes",
-                        "isdevice" | "isbios" => {
-                            if value == "yes" {
-                                runnable = false;
-                            }
-                        }
-                        "cloneof" if value.contains("proto") => prototype = true,
+                        "isdevice" | "isbios" if value == "yes" => runnable = false,
                         _ => {}
                     }
                 }

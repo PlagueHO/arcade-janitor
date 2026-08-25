@@ -20,8 +20,12 @@ use cleanmame_core::operations::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use tokio_stream::{self as stream, StreamExt};
 use tracing::info;
+
+use mcp_server_rs as _;
+use tokio_stream as _;
+
+const MCP_SDK_NAME: &str = "mcp-server-rs";
 
 #[derive(Clone)]
 struct AppState;
@@ -48,10 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .parse()?;
 
     let app = Router::new()
-        .route(
-            "/health",
-            get(|| async { format!("ok ({})", mcp_sdk_name()) }),
-        )
+        .route("/health", get(|| async { format!("ok ({MCP_SDK_NAME})") }))
         .route("/tools", get(list_tools))
         .route("/tools/call", post(call_tool))
         .route("/ws", get(websocket_handler))
@@ -71,7 +72,7 @@ async fn shutdown_signal() {
 }
 
 async fn list_tools() -> Json<Vec<ToolDefinition>> {
-    Json(stream::iter(tools()).collect::<Vec<_>>().await)
+    Json(tools())
 }
 
 async fn websocket_handler(
@@ -102,12 +103,27 @@ async fn handle_socket(mut socket: WebSocket) {
 
 async fn call_tool(Json(request): Json<ToolRequest>) -> impl IntoResponse {
     let response = execute_tool(request);
-    let status = if response.get("ok").and_then(Value::as_bool) == Some(true) {
-        StatusCode::OK
-    } else {
-        StatusCode::BAD_REQUEST
-    };
+    let status = response_status(&response);
     (status, Json(response))
+}
+
+fn response_status(response: &Value) -> StatusCode {
+    if response.get("ok").and_then(Value::as_bool) == Some(true) {
+        return StatusCode::OK;
+    }
+
+    let error = response
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if error.contains("unknown tool")
+        || error.contains("missing field")
+        || error.contains("invalid type")
+    {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
 }
 
 fn execute_tool(request: ToolRequest) -> Value {
@@ -239,10 +255,6 @@ fn tool(name: &'static str, description: &'static str) -> ToolDefinition {
             "additionalProperties": true
         }),
     }
-}
-
-fn mcp_sdk_name() -> &'static str {
-    std::any::type_name::<mcp_server_rs::server::Server<()>>()
 }
 
 #[derive(Debug, Deserialize)]
