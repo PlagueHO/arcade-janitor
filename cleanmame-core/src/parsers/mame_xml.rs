@@ -24,7 +24,6 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                 let mut name = None;
                 let mut runnable = true;
                 let mut mechanical = false;
-                let prototype = false;
 
                 for attr in element.attributes().flatten() {
                     let value = attr.value.as_ref().to_string();
@@ -41,7 +40,6 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                     let mut entry = RomEntry::new(name);
                     entry.metadata.flags.runnable = runnable;
                     entry.metadata.flags.mechanical = mechanical;
-                    entry.metadata.flags.prototype = prototype;
                     current = Some(entry);
                 }
             }

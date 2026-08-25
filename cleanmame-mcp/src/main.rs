@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tracing::info;
 
+// Kept as direct dependencies because the v1 skeleton is expected to include
+// these MCP/stream crates while exposing the initial Axum WebSocket transport.
 use mcp_server_rs as _;
 use tokio_stream as _;
 
@@ -174,7 +176,7 @@ fn filter_roms_tool(args: Value) -> Value {
 }
 
 fn move_roms_tool(args: Value) -> Value {
-    match parse_mutating_args(args).and_then(|args| {
+    match parse_move_args(args).and_then(|args| {
         let roms = scan_rom_folder(
             args.filter.metadata.rom_folder,
             args.filter.metadata.mame_xml,
@@ -224,7 +226,7 @@ fn parse_filter_args(args: Value) -> anyhow::Result<FilterArgs> {
     serde_json::from_value(args).map_err(Into::into)
 }
 
-fn parse_mutating_args(args: Value) -> anyhow::Result<MoveArgs> {
+fn parse_move_args(args: Value) -> anyhow::Result<MoveArgs> {
     serde_json::from_value(args).map_err(Into::into)
 }
 

@@ -23,10 +23,21 @@ pub fn move_roms(
             .ok_or_else(|| CleanMameError::MissingPath(rom.name.clone()))?;
         let target = target_folder.join(file_name);
         if !dry_run {
-            fs::rename(source, &target).map_err(|source| io_error(&target, source))?;
+            move_file(source, &target)?;
         }
         moved.push(rom.name.clone());
     }
 
     Ok(moved)
+}
+
+fn move_file(source: &Path, target: &Path) -> Result<()> {
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(_rename_error) => {
+            fs::copy(source, target).map_err(|error| io_error(target, error))?;
+            fs::remove_file(source).map_err(|error| io_error(source, error))?;
+            Ok(())
+        }
+    }
 }
