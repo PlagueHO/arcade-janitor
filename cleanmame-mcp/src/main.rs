@@ -100,7 +100,11 @@ async fn handle_request(router: CleanMameRouter, request: JsonRpcRequest) -> Jso
         "tools/call" => router.handle_tools_call(request).await,
         _ => return rpc_error(id, -32601, "method not found"),
     };
-    result.unwrap_or_else(|error| rpc_error(id, -32602, error.to_string()))
+    match result {
+        Ok(response) => response,
+        Err(McpError::InvalidParameters(message)) => rpc_error(id, -32602, message),
+        Err(error) => rpc_error(id, -32603, error.to_string()),
+    }
 }
 
 fn rpc_error(id: Option<u64>, code: i32, message: impl Into<String>) -> JsonRpcResponse {
