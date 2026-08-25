@@ -9,8 +9,8 @@ repository.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 cleanmame-core = { path = "../cleanmame-core" }
-# Required v1 MCP stack crates. The current server skeleton exposes an Axum
-# WebSocket transport while keeping these dependencies explicit for MCP work.
+mcp-core-rs.workspace = true
+mcp-error-rs.workspace = true
 mcp-server-rs.workspace = true
 serde.workspace = true
 serde_json.workspace = true

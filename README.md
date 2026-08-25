@@ -6,7 +6,7 @@ CleanMAME is a focused Rust CLI and MCP server for managing MAME ROM folders usi
 
 - `cleanmame-core` - shared models, parsers, operations, and utilities
 - `cleanmame-cli` - command-line interface
-- `cleanmame-mcp` - Axum HTTP/WebSocket MCP server skeleton
+- `cleanmame-mcp` - Axum HTTP/WebSocket MCP server
 
 ## v1 scope
 
@@ -32,8 +32,7 @@ cargo run -p cleanmame-mcp
 Endpoints:
 
 - `GET /health`
-- `GET /tools`
-- `POST /tools/call`
+- `POST /mcp` (MCP JSON-RPC)
 - `GET /ws`
 
 ## Development

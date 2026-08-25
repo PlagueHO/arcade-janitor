@@ -338,6 +338,8 @@ dependencies = [
  "anyhow",
  "axum",
  "cleanmame-core",
+ "mcp-core-rs",
+ "mcp-error-rs",
  "mcp-server-rs",
  "serde",
  "serde_json",

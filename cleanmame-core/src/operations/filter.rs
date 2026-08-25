@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::models::{Region, RomEntry};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FilterOptions {
     pub genre_contains: Option<String>,
     pub region: Option<Region>,

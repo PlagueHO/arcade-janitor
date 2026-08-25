@@ -1,6 +1,9 @@
 use std::{fs, path::Path};
 
-use quick_xml::{Reader, events::Event};
+use quick_xml::{
+    Reader,
+    events::{BytesStart, Event},
+};
 
 use crate::{CleanMameError, Result, errors::io_error, models::RomEntry};
 
@@ -12,7 +15,6 @@ pub fn parse_mame_xml_file(path: impl AsRef<Path>) -> Result<Vec<RomEntry>> {
 
 pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
     let mut reader = Reader::from_str(content);
-    reader.config_mut().trim_text(true);
 
     let mut entries = Vec::new();
     let mut current: Option<RomEntry> = None;
@@ -25,8 +27,12 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                 let mut runnable = true;
                 let mut mechanical = false;
 
-                for attr in element.attributes().flatten() {
-                    let value = attr.value.as_ref().to_string();
+                for attr in element.attributes() {
+                    let attr = attr.map_err(|error| CleanMameError::Xml(error.to_string()))?;
+                    let value = attr
+                        .normalized_value(Default::default())
+                        .map_err(|error| CleanMameError::Xml(error.to_string()))?
+                        .into_owned();
                     match attr.key.as_ref() {
                         "name" => name = Some(value),
                         "runnable" => runnable = value != "no",
@@ -54,28 +60,42 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
 
                 if current_field == Some(Field::Driver) {
                     if let Some(entry) = current.as_mut() {
-                        for attr in element.attributes().flatten() {
-                            let value = attr.value.as_ref().to_ascii_lowercase();
-                            if attr.key.as_ref() == "status" && value == "preliminary" {
-                                entry.metadata.flags.prototype = true;
-                            }
-                            if attr.key.as_ref() == "emulation" && value == "preliminary" {
-                                entry.metadata.flags.prototype = true;
-                            }
-                        }
+                        apply_driver_flags(&element, entry)?;
                     }
                     current_field = None;
                 }
             }
+            Ok(Event::Empty(element)) if element.name().as_ref() == "driver" => {
+                if let Some(entry) = current.as_mut() {
+                    apply_driver_flags(&element, entry)?;
+                }
+            }
             Ok(Event::Text(text)) => {
                 if let (Some(entry), Some(field)) = (current.as_mut(), current_field) {
-                    let value = text.as_ref().to_string();
-                    match field {
-                        Field::Description => entry.description = Some(value),
-                        Field::Year => entry.year = Some(value),
-                        Field::Manufacturer => entry.manufacturer = Some(value),
-                        Field::Driver => {}
-                    }
+                    let value = quick_xml::escape::unescape(text.as_ref())
+                        .map_err(|error| CleanMameError::Xml(error.to_string()))?
+                        .into_owned();
+                    append_field(entry, field, &value);
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if let (Some(entry), Some(field)) = (current.as_mut(), current_field) {
+                    let value = if let Some(character) = reference
+                        .resolve_char_ref()
+                        .map_err(|error| CleanMameError::Xml(error.to_string()))?
+                    {
+                        character.to_string()
+                    } else {
+                        quick_xml::escape::resolve_predefined_entity(reference.as_ref())
+                            .ok_or_else(|| {
+                                CleanMameError::Xml(format!(
+                                    "unrecognized entity '{}'",
+                                    reference.as_ref()
+                                ))
+                            })?
+                            .to_string()
+                    };
+                    append_field(entry, field, &value);
                 }
             }
             Ok(Event::End(element)) if matches!(element.name().as_ref(), "machine" | "game") => {
@@ -87,10 +107,43 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                     entries.push(entry);
                 }
             }
+            Ok(Event::End(element))
+                if matches!(
+                    element.name().as_ref(),
+                    "description" | "year" | "manufacturer" | "driver"
+                ) =>
+            {
+                current_field = None;
+            }
             Ok(Event::Eof) => break,
             Err(error) => return Err(CleanMameError::Xml(error.to_string())),
             _ => {}
         }
+    }
+
+    fn append_field(entry: &mut RomEntry, field: Field, value: &str) {
+        let target = match field {
+            Field::Description => &mut entry.description,
+            Field::Year => &mut entry.year,
+            Field::Manufacturer => &mut entry.manufacturer,
+            Field::Driver => return,
+        };
+        target.get_or_insert_default().push_str(value);
+    }
+
+    fn apply_driver_flags(element: &BytesStart<'_>, entry: &mut RomEntry) -> Result<()> {
+        for attr in element.attributes() {
+            let attr = attr.map_err(|error| CleanMameError::Xml(error.to_string()))?;
+            let value = attr
+                .normalized_value(Default::default())
+                .map_err(|error| CleanMameError::Xml(error.to_string()))?;
+            if matches!(attr.key.as_ref(), "status" | "emulation")
+                && value.eq_ignore_ascii_case("preliminary")
+            {
+                entry.metadata.flags.prototype = true;
+            }
+        }
+        Ok(())
     }
 
     Ok(entries)
@@ -115,12 +168,16 @@ mod tests {
 
     #[test]
     fn parses_machine_metadata() {
-        let xml = r#"<mame><machine name="pacman"><description>Pac-Man (USA)</description><year>1980</year><manufacturer>Namco</manufacturer></machine></mame>"#;
+        let xml = r#"<mame><machine name="pacman&amp;"><description>Pac-Man &amp; Friends (USA)</description><year>1980</year><manufacturer>Namco</manufacturer><driver status="preliminary"/></machine></mame>"#;
         let roms = parse_mame_xml_str(xml).unwrap();
 
         assert_eq!(roms.len(), 1);
-        assert_eq!(roms[0].name, "pacman");
-        assert_eq!(roms[0].description.as_deref(), Some("Pac-Man (USA)"));
+        assert_eq!(roms[0].name, "pacman&");
+        assert_eq!(
+            roms[0].description.as_deref(),
+            Some("Pac-Man & Friends (USA)")
+        );
         assert!(roms[0].metadata.flags.runnable);
+        assert!(roms[0].metadata.flags.prototype);
     }
 }

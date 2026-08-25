@@ -1,12 +1,11 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{future::Future, net::SocketAddr, path::PathBuf, pin::Pin};
 
 use axum::{
     Json, Router,
     extract::{
-        State, WebSocketUpgrade,
+        WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
@@ -17,29 +16,27 @@ use cleanmame_core::operations::{
     query::{find_by_name, load_metadata, scan_rom_folder},
     report::generate_report,
 };
-use serde::{Deserialize, Serialize};
+use mcp_core_rs::{
+    Resource, Tool,
+    content::Content,
+    prompt::Prompt,
+    protocol::{
+        capabilities::ServerCapabilities,
+        error::ErrorData,
+        message::{JsonRpcRequest, JsonRpcResponse},
+    },
+};
+use mcp_error_rs::{Error as McpError, Result as McpResult};
+use mcp_server_rs::router::{capabilities::CapabilitiesBuilder, traits::Router as McpRouter};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tracing::info;
 
-const MCP_SDK_NAME: &str = "mcp-server-rs";
+const SERVER_NAME: &str = "cleanmame";
 
 #[derive(Clone)]
-struct AppState;
-
-#[derive(Debug, Deserialize)]
-struct ToolRequest {
-    tool: String,
-    #[serde(default)]
-    args: Value,
-}
-
-#[derive(Debug, Serialize)]
-struct ToolDefinition {
-    name: &'static str,
-    description: &'static str,
-    input_schema: Value,
-}
+struct CleanMameRouter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,11 +46,9 @@ async fn main() -> anyhow::Result<()> {
         .parse()?;
 
     let app = Router::new()
-        .route("/health", get(|| async { format!("ok ({MCP_SDK_NAME})") }))
-        .route("/tools", get(list_tools))
-        .route("/tools/call", post(call_tool))
-        .route("/ws", get(websocket_handler))
-        .with_state(AppState);
+        .route("/health", get(|| async { format!("ok ({SERVER_NAME})") }))
+        .route("/mcp", post(mcp_handler))
+        .route("/ws", get(websocket_handler));
 
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "CleanMAME MCP server listening");
@@ -68,14 +63,7 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-async fn list_tools() -> Json<Vec<ToolDefinition>> {
-    Json(tools())
-}
-
-async fn websocket_handler(
-    ws: WebSocketUpgrade,
-    State(_state): State<AppState>,
-) -> impl IntoResponse {
+async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(handle_socket)
 }
 
@@ -84,14 +72,14 @@ async fn handle_socket(mut socket: WebSocket) {
         let Message::Text(text) = message else {
             continue;
         };
-        let response = match serde_json::from_str::<ToolRequest>(&text) {
-            Ok(request) => tokio::task::spawn_blocking(move || execute_tool(request))
-                .await
-                .unwrap_or_else(|error| json!({ "ok": false, "error": error.to_string() })),
-            Err(error) => json!({ "ok": false, "error": error.to_string() }),
+        let response = match serde_json::from_str::<JsonRpcRequest>(&text) {
+            Ok(request) => handle_request(CleanMameRouter, request).await,
+            Err(error) => rpc_error(None, -32700, error.to_string()),
         };
         if socket
-            .send(Message::Text(response.to_string().into()))
+            .send(Message::Text(
+                serde_json::to_string(&response).unwrap_or_default().into(),
+            ))
             .await
             .is_err()
         {
@@ -100,47 +88,109 @@ async fn handle_socket(mut socket: WebSocket) {
     }
 }
 
-async fn call_tool(Json(request): Json<ToolRequest>) -> impl IntoResponse {
-    match tokio::task::spawn_blocking(move || execute_tool(request)).await {
-        Ok(response) => {
-            let status = response_status(&response);
-            (status, Json(response))
-        }
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "ok": false, "error": error.to_string() })),
-        ),
+async fn mcp_handler(Json(request): Json<JsonRpcRequest>) -> Json<JsonRpcResponse> {
+    Json(handle_request(CleanMameRouter, request).await)
+}
+
+async fn handle_request(router: CleanMameRouter, request: JsonRpcRequest) -> JsonRpcResponse {
+    let id = request.id;
+    let result = match request.method.as_str() {
+        "initialize" => router.handle_initialize(request).await,
+        "tools/list" => router.handle_tools_list(request).await,
+        "tools/call" => router.handle_tools_call(request).await,
+        _ => return rpc_error(id, -32601, "method not found"),
+    };
+    result.unwrap_or_else(|error| rpc_error(id, -32602, error.to_string()))
+}
+
+fn rpc_error(id: Option<u64>, code: i32, message: impl Into<String>) -> JsonRpcResponse {
+    JsonRpcResponse::error(
+        id,
+        ErrorData {
+            code,
+            message: message.into(),
+            data: None,
+        },
+    )
+}
+
+impl McpRouter for CleanMameRouter {
+    fn name(&self) -> String {
+        SERVER_NAME.to_string()
+    }
+
+    fn instructions(&self) -> String {
+        "Scan, query, filter, move, delete, and report on MAME ROMs.".to_string()
+    }
+
+    fn capabilities(&self) -> ServerCapabilities {
+        CapabilitiesBuilder::new().with_tools(false).build()
+    }
+
+    fn list_tools(&self) -> Vec<Tool> {
+        tools()
+    }
+
+    fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: Value,
+    ) -> Pin<Box<dyn Future<Output = McpResult<Vec<Content>>> + Send + 'static>> {
+        let tool_name = tool_name.to_string();
+        Box::pin(async move {
+            let response = tokio::task::spawn_blocking(move || execute_tool(&tool_name, arguments))
+                .await
+                .map_err(|error| McpError::System(error.to_string()))?;
+            if response.get("ok").and_then(Value::as_bool) == Some(true) {
+                Ok(vec![Content::text(response.to_string())])
+            } else {
+                Err(McpError::System(
+                    response
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("tool execution failed")
+                        .to_string(),
+                ))
+            }
+        })
+    }
+
+    fn list_resources(&self) -> Vec<Resource> {
+        Vec::new()
+    }
+
+    fn read_resource(
+        &self,
+        _uri: &str,
+    ) -> Pin<Box<dyn Future<Output = McpResult<String>> + Send + 'static>> {
+        Box::pin(async {
+            Err(McpError::Protocol(
+                "resources are not supported".to_string(),
+            ))
+        })
+    }
+
+    fn list_prompts(&self) -> Vec<Prompt> {
+        Vec::new()
+    }
+
+    fn get_prompt(
+        &self,
+        _prompt_name: &str,
+    ) -> Pin<Box<dyn Future<Output = McpResult<String>> + Send + 'static>> {
+        Box::pin(async { Err(McpError::Protocol("prompts are not supported".to_string())) })
     }
 }
 
-fn response_status(response: &Value) -> StatusCode {
-    if response.get("ok").and_then(Value::as_bool) == Some(true) {
-        return StatusCode::OK;
-    }
-
-    let error = response
-        .get("error")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if error.contains("unknown tool")
-        || error.contains("missing field")
-        || error.contains("invalid type")
-    {
-        StatusCode::BAD_REQUEST
-    } else {
-        StatusCode::INTERNAL_SERVER_ERROR
-    }
-}
-
-fn execute_tool(request: ToolRequest) -> Value {
-    match request.tool.as_str() {
-        "scan_roms" => scan_roms(request.args),
-        "query_metadata" => query_metadata(request.args),
-        "filter_roms" => filter_roms_tool(request.args),
-        "move_roms" => move_roms_tool(request.args),
-        "delete_roms" => delete_roms_tool(request.args),
-        "generate_report" => generate_report_tool(request.args),
-        _ => json!({ "ok": false, "error": format!("unknown tool '{}'", request.tool) }),
+fn execute_tool(tool_name: &str, args: Value) -> Value {
+    match tool_name {
+        "scan_roms" => scan_roms(args),
+        "query_metadata" => query_metadata(args),
+        "filter_roms" => filter_roms_tool(args),
+        "move_roms" => move_roms_tool(args),
+        "delete_roms" => delete_roms_tool(args),
+        "generate_report" => generate_report_tool(args),
+        _ => json!({ "ok": false, "error": format!("unknown tool '{tool_name}'") }),
     }
 }
 
@@ -181,12 +231,14 @@ fn filter_roms_tool(args: Value) -> Value {
 
 fn move_roms_tool(args: Value) -> Value {
     match parse_move_args(args).and_then(|args| {
+        let mut options = args.filter.options;
+        options.only_available = true;
         let roms = scan_rom_folder(
             args.filter.metadata.rom_folder,
             args.filter.metadata.mame_xml,
             args.filter.metadata.catver,
         )?;
-        let filtered = filter_roms(&roms, &args.filter.options);
+        let filtered = filter_roms(&roms, &options);
         move_roms(&filtered, args.target_folder, args.dry_run).map_err(anyhow::Error::from)
     }) {
         Ok(moved) => json!({ "ok": true, "roms": moved }),
@@ -196,12 +248,14 @@ fn move_roms_tool(args: Value) -> Value {
 
 fn delete_roms_tool(args: Value) -> Value {
     match parse_delete_args(args).and_then(|args| {
+        let mut options = args.filter.options;
+        options.only_available = true;
         let roms = scan_rom_folder(
             args.filter.metadata.rom_folder,
             args.filter.metadata.mame_xml,
             args.filter.metadata.catver,
         )?;
-        let filtered = filter_roms(&roms, &args.filter.options);
+        let filtered = filter_roms(&roms, &options);
         delete_roms(&filtered, args.dry_run).map_err(anyhow::Error::from)
     }) {
         Ok(deleted) => json!({ "ok": true, "roms": deleted }),
@@ -238,29 +292,124 @@ fn parse_delete_args(args: Value) -> anyhow::Result<DeleteArgs> {
     serde_json::from_value(args).map_err(Into::into)
 }
 
-fn tools() -> Vec<ToolDefinition> {
+fn tools() -> Vec<Tool> {
     vec![
-        tool(
+        Tool::new(
             "scan_roms",
             "Scan a ROM folder using mame.xml and optional catver.ini",
+            metadata_schema(),
         ),
-        tool("query_metadata", "Query metadata for one ROM name"),
-        tool("filter_roms", "Filter available ROMs by metadata"),
-        tool("move_roms", "Move filtered ROM files to a target folder"),
-        tool("delete_roms", "Delete filtered ROM files"),
-        tool("generate_report", "Generate a simple metadata report"),
+        Tool::new(
+            "query_metadata",
+            "Query metadata for one ROM name",
+            query_schema(),
+        ),
+        Tool::new(
+            "filter_roms",
+            "Filter available ROMs by metadata",
+            filter_schema(),
+        ),
+        Tool::new(
+            "move_roms",
+            "Move filtered ROM files to a target folder",
+            move_schema(),
+        ),
+        Tool::new("delete_roms", "Delete filtered ROM files", delete_schema()),
+        Tool::new(
+            "generate_report",
+            "Generate a simple metadata report",
+            metadata_schema(),
+        ),
     ]
 }
 
-fn tool(name: &'static str, description: &'static str) -> ToolDefinition {
-    ToolDefinition {
-        name,
-        description,
-        input_schema: json!({
-            "type": "object",
-            "additionalProperties": true
-        }),
-    }
+fn metadata_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "rom_folder": { "type": "string" },
+            "mame_xml": { "type": "string" },
+            "catver": { "type": ["string", "null"] }
+        },
+        "required": ["rom_folder", "mame_xml"],
+        "additionalProperties": false
+    })
+}
+
+fn query_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "name": { "type": "string" },
+            "mame_xml": { "type": "string" },
+            "catver": { "type": ["string", "null"] }
+        },
+        "required": ["name", "mame_xml"],
+        "additionalProperties": false
+    })
+}
+
+fn filter_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "metadata": metadata_schema(),
+            "options": filter_options_schema()
+        },
+        "required": ["metadata"],
+        "additionalProperties": false
+    })
+}
+
+fn filter_options_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "genre_contains": { "type": ["string", "null"] },
+            "region": {
+                "oneOf": [
+                    { "enum": ["Usa", "Japan", "Europe", "World", "Asia", "Unknown"] },
+                    {
+                        "type": "object",
+                        "properties": { "Other": { "type": "string" } },
+                        "required": ["Other"],
+                        "additionalProperties": false
+                    },
+                    { "type": "null" }
+                ]
+            },
+            "include_mature": { "type": "boolean" },
+            "include_mechanical": { "type": "boolean" },
+            "include_prototype": { "type": "boolean" },
+            "only_available": { "type": "boolean" }
+        },
+        "additionalProperties": false
+    })
+}
+
+fn move_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "filter": filter_schema(),
+            "target_folder": { "type": "string" },
+            "dry_run": { "type": "boolean" }
+        },
+        "required": ["filter", "target_folder"],
+        "additionalProperties": false
+    })
+}
+
+fn delete_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "filter": filter_schema(),
+            "dry_run": { "type": "boolean" }
+        },
+        "required": ["filter"],
+        "additionalProperties": false
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -304,10 +453,72 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn lists_required_tools() {
-        let tools = list_tools().await.0;
+    async fn lists_required_tools_with_schemas_and_preserves_request_id() {
+        let response = handle_request(
+            CleanMameRouter,
+            JsonRpcRequest::new(Some(42), "tools/list", None),
+        )
+        .await;
+        let tools = response.result.unwrap()["tools"]
+            .as_array()
+            .unwrap()
+            .clone();
 
-        assert!(tools.iter().any(|tool| tool.name == "scan_roms"));
-        assert!(tools.iter().any(|tool| tool.name == "generate_report"));
+        assert_eq!(response.id, Some(42));
+        let scan = tools
+            .iter()
+            .find(|tool| tool["name"] == "scan_roms")
+            .unwrap();
+        assert_eq!(
+            scan["inputSchema"]["required"],
+            json!(["rom_folder", "mame_xml"])
+        );
+        assert!(tools.iter().any(|tool| tool["name"] == "generate_report"));
+    }
+
+    #[test]
+    fn destructive_tools_only_select_available_roms() {
+        let folder = std::env::temp_dir().join(format!("cleanmame-mcp-{}", std::process::id()));
+        let rom_folder = folder.join("roms");
+        let target_folder = folder.join("target");
+        let mame_xml = folder.join("mame.xml");
+        std::fs::create_dir_all(&rom_folder).unwrap();
+        std::fs::write(rom_folder.join("available.zip"), "").unwrap();
+        std::fs::write(
+            &mame_xml,
+            r#"<mame><machine name="available"></machine><machine name="missing"></machine></mame>"#,
+        )
+        .unwrap();
+
+        let response = execute_tool(
+            "move_roms",
+            json!({
+                "filter": {
+                    "metadata": {
+                        "rom_folder": rom_folder,
+                        "mame_xml": mame_xml
+                    }
+                },
+                "target_folder": target_folder,
+                "dry_run": true
+            }),
+        );
+
+        assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
+        let response = execute_tool(
+            "delete_roms",
+            json!({
+                "filter": {
+                    "metadata": {
+                        "rom_folder": rom_folder,
+                        "mame_xml": mame_xml
+                    }
+                },
+                "dry_run": true
+            }),
+        );
+
+        assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
+        std::fs::remove_dir_all(folder).unwrap();
     }
 }
