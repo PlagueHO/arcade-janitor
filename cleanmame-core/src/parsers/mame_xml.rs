@@ -1,6 +1,9 @@
 use std::{fs, path::Path};
 
-use quick_xml::{Reader, events::Event};
+use quick_xml::{
+    Reader,
+    events::{BytesStart, Event},
+};
 
 use crate::{CleanMameError, Result, errors::io_error, models::RomEntry};
 
@@ -20,30 +23,11 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(element)) if matches!(element.name().as_ref(), "machine" | "game") => {
-                let mut name = None;
-                let mut runnable = true;
-                let mut mechanical = false;
-
-                for attr in element.attributes() {
-                    let attr = attr.map_err(|error| CleanMameError::Xml(error.to_string()))?;
-                    let value = attr
-                        .normalized_value(Default::default())
-                        .map_err(|error| CleanMameError::Xml(error.to_string()))?
-                        .into_owned();
-                    match attr.key.as_ref() {
-                        "name" => name = Some(value),
-                        "runnable" => runnable = value != "no",
-                        "ismechanical" => mechanical = value == "yes",
-                        "isdevice" | "isbios" if value == "yes" => runnable = false,
-                        _ => {}
-                    }
-                }
-
-                if let Some(name) = name {
-                    let mut entry = RomEntry::new(name);
-                    entry.metadata.flags.runnable = runnable;
-                    entry.metadata.flags.mechanical = mechanical;
-                    current = Some(entry);
+                current = parse_machine(&element)?;
+            }
+            Ok(Event::Empty(element)) if matches!(element.name().as_ref(), "machine" | "game") => {
+                if let Some(entry) = parse_machine(&element)? {
+                    entries.push(finalize_entry(entry));
                 }
             }
             Ok(Event::Start(element)) => {
@@ -83,12 +67,8 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                 }
             }
             Ok(Event::End(element)) if matches!(element.name().as_ref(), "machine" | "game") => {
-                if let Some(mut entry) = current.take() {
-                    entry.metadata.region =
-                        crate::models::Region::infer(&entry.name, entry.description.as_deref());
-                    entry.metadata.flags.mature |= has_mature_marker(&entry.name)
-                        || entry.description.as_deref().is_some_and(has_mature_marker);
-                    entries.push(entry);
+                if let Some(entry) = current.take() {
+                    entries.push(finalize_entry(entry));
                 }
             }
             Ok(Event::End(element))
@@ -117,9 +97,54 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
     Ok(entries)
 }
 
+fn parse_machine(element: &BytesStart<'_>) -> Result<Option<RomEntry>> {
+    let mut name = None;
+    let mut runnable = true;
+    let mut excluded = false;
+    let mut mechanical = false;
+
+    for attr in element.attributes() {
+        let attr = attr.map_err(|error| CleanMameError::Xml(error.to_string()))?;
+        let value = attr
+            .normalized_value(Default::default())
+            .map_err(|error| CleanMameError::Xml(error.to_string()))?
+            .into_owned();
+        match attr.key.as_ref() {
+            "name" => name = Some(value),
+            "runnable" => runnable = value != "no",
+            "ismechanical" => mechanical = value == "yes",
+            "isdevice" | "isbios" if value == "yes" => excluded = true,
+            _ => {}
+        }
+    }
+
+    Ok(name.map(|name| {
+        let mut entry = RomEntry::new(name);
+        entry.metadata.flags.runnable = runnable && !excluded;
+        entry.metadata.flags.mechanical = mechanical;
+        entry
+    }))
+}
+
+fn finalize_entry(mut entry: RomEntry) -> RomEntry {
+    entry.metadata.region = crate::models::Region::infer(&entry.name, entry.description.as_deref());
+    entry.metadata.flags.mature |= has_mature_marker(&entry.name)
+        || entry.description.as_deref().is_some_and(has_mature_marker);
+    entry.metadata.flags.prototype |= has_prototype_marker(&entry.name)
+        || entry
+            .description
+            .as_deref()
+            .is_some_and(has_prototype_marker);
+    entry
+}
+
 fn has_mature_marker(value: &str) -> bool {
     let value = value.to_ascii_lowercase();
-    value.contains("mature") || value.contains("adult") || value.contains("mahjong")
+    value.contains("mature") || value.contains("adult")
+}
+
+fn has_prototype_marker(value: &str) -> bool {
+    value.to_ascii_lowercase().contains("prototype")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -146,5 +171,21 @@ mod tests {
         );
         assert!(roms[0].metadata.flags.runnable);
         assert!(!roms[0].metadata.flags.prototype);
+    }
+
+    #[test]
+    fn excludes_devices_regardless_of_attribute_order() {
+        let xml = r#"<mame><machine name="device-first" isdevice="yes" runnable="yes"/><machine name="runnable-first" runnable="yes" isbios="yes"/></mame>"#;
+        let roms = parse_mame_xml_str(xml).unwrap();
+
+        assert!(roms.iter().all(|rom| !rom.metadata.flags.runnable));
+    }
+
+    #[test]
+    fn identifies_prototype_descriptions() {
+        let xml = r#"<mame><machine name="game"><description>Game (Prototype)</description></machine></mame>"#;
+        let roms = parse_mame_xml_str(xml).unwrap();
+
+        assert!(roms[0].metadata.flags.prototype);
     }
 }

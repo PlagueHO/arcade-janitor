@@ -75,8 +75,17 @@ fn apply_genres(roms: &mut [RomEntry], genres: &HashMap<String, Genre>) {
     for rom in roms {
         if let Some(genre) = genres.get(&rom.name.to_ascii_lowercase()) {
             rom.metadata.genre = Some(genre.clone());
+            rom.metadata.flags.mature |= is_mature_genre(genre);
         }
     }
+}
+
+fn is_mature_genre(genre: &Genre) -> bool {
+    genre.category.eq_ignore_ascii_case("mature")
+        || genre
+            .subcategory
+            .as_deref()
+            .is_some_and(|subcategory| subcategory.eq_ignore_ascii_case("mature"))
 }
 
 #[cfg(test)]
@@ -105,5 +114,21 @@ mod tests {
         apply_genres(&mut roms, &genres);
 
         assert_eq!(roms[0].metadata.genre.as_ref().unwrap().category, "Maze");
+    }
+
+    #[test]
+    fn marks_mature_catver_genres() {
+        let mut roms = vec![RomEntry::new("adultgame")];
+        let genres = HashMap::from([(
+            "adultgame".to_string(),
+            Genre {
+                category: "Mature".to_string(),
+                subcategory: None,
+            },
+        )]);
+
+        apply_genres(&mut roms, &genres);
+
+        assert!(roms[0].metadata.flags.mature);
     }
 }

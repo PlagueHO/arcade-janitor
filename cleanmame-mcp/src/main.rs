@@ -1,11 +1,12 @@
-use std::{future::Future, net::SocketAddr, path::PathBuf, pin::Pin};
+use std::{future::Future, net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc};
 
 use axum::{
     Json, Router,
     extract::{
-        WebSocketUpgrade,
+        State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -31,12 +32,19 @@ use mcp_server_rs::router::{capabilities::CapabilitiesBuilder, traits::Router as
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, warn};
 
 const SERVER_NAME: &str = "cleanmame";
 
 #[derive(Clone)]
-struct CleanMameRouter;
+struct AppState {
+    auth_token: Option<Arc<str>>,
+}
+
+#[derive(Clone)]
+struct CleanMameRouter {
+    destructive_tools_allowed: bool,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -44,11 +52,21 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = std::env::var("CLEANMAME_MCP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:3000".to_string())
         .parse()?;
+    let state = AppState {
+        auth_token: std::env::var("CLEANMAME_MCP_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty())
+            .map(Arc::<str>::from),
+    };
+    if state.auth_token.is_none() {
+        warn!("destructive MCP tools are disabled; set CLEANMAME_MCP_TOKEN to enable them");
+    }
 
     let app = Router::new()
         .route("/health", get(|| async { format!("ok ({SERVER_NAME})") }))
         .route("/mcp", post(mcp_handler))
-        .route("/ws", get(websocket_handler));
+        .route("/ws", get(websocket_handler))
+        .with_state(state);
 
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "CleanMAME MCP server listening");
@@ -63,17 +81,27 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_socket)
+async fn websocket_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    if !has_trusted_origin(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    let router = router_for_request(&state, &headers);
+    ws.on_upgrade(move |socket| handle_socket(socket, router))
+        .into_response()
 }
 
-async fn handle_socket(mut socket: WebSocket) {
+async fn handle_socket(mut socket: WebSocket, router: CleanMameRouter) {
     while let Some(Ok(message)) = socket.recv().await {
         let Message::Text(text) = message else {
             continue;
         };
         let response = match serde_json::from_str::<JsonRpcRequest>(&text) {
-            Ok(request) => handle_request(CleanMameRouter, request).await,
+            Ok(request) => handle_request(router.clone(), request).await,
             Err(error) => Some(rpc_error(None, -32700, error.to_string())),
         };
         if let Some(response) = response
@@ -89,20 +117,60 @@ async fn handle_socket(mut socket: WebSocket) {
     }
 }
 
-async fn mcp_handler(Json(request): Json<JsonRpcRequest>) -> Response {
-    match handle_request(CleanMameRouter, request).await {
+async fn mcp_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<JsonRpcRequest>,
+) -> Response {
+    match handle_request(router_for_request(&state, &headers), request).await {
         Some(response) => Json(response).into_response(),
-        None => ().into_response(),
+        None => StatusCode::ACCEPTED.into_response(),
     }
+}
+
+fn router_for_request(state: &AppState, headers: &HeaderMap) -> CleanMameRouter {
+    CleanMameRouter {
+        destructive_tools_allowed: is_authorized(state, headers),
+    }
+}
+
+fn is_authorized(state: &AppState, headers: &HeaderMap) -> bool {
+    let Some(token) = &state.auth_token else {
+        return false;
+    };
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|provided| provided == token.as_ref())
+}
+
+fn has_trusted_origin(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    [
+        "http://localhost",
+        "https://localhost",
+        "http://127.0.0.1",
+        "https://127.0.0.1",
+    ]
+    .iter()
+    .any(|base| {
+        origin == *base
+            || origin.strip_prefix(base).is_some_and(|suffix| {
+                suffix.starts_with(':') && suffix[1..].bytes().all(|byte| byte.is_ascii_digit())
+            })
+    })
 }
 
 async fn handle_request(
     router: CleanMameRouter,
     request: JsonRpcRequest,
 ) -> Option<JsonRpcResponse> {
-    if request.method.starts_with("notifications/") {
-        return None;
-    }
     let id = request.id?;
     let result = match request.method.as_str() {
         "initialize" => router.handle_initialize(request).await,
@@ -143,6 +211,9 @@ impl McpRouter for CleanMameRouter {
 
     fn list_tools(&self) -> Vec<Tool> {
         tools()
+            .into_iter()
+            .filter(|tool| self.destructive_tools_allowed || !is_destructive_tool(&tool.name))
+            .collect()
     }
 
     fn call_tool(
@@ -151,7 +222,13 @@ impl McpRouter for CleanMameRouter {
         arguments: Value,
     ) -> Pin<Box<dyn Future<Output = McpResult<Vec<Content>>> + Send + 'static>> {
         let tool_name = tool_name.to_string();
+        let destructive_tools_allowed = self.destructive_tools_allowed;
         Box::pin(async move {
+            if is_destructive_tool(&tool_name) && !destructive_tools_allowed {
+                return Err(McpError::Protocol(
+                    "authorization is required for destructive tools".to_string(),
+                ));
+            }
             let response = tokio::task::spawn_blocking(move || execute_tool(&tool_name, arguments))
                 .await
                 .map_err(|error| McpError::System(error.to_string()))?;
@@ -194,6 +271,10 @@ impl McpRouter for CleanMameRouter {
     ) -> Pin<Box<dyn Future<Output = McpResult<String>> + Send + 'static>> {
         Box::pin(async { Err(McpError::Protocol("prompts are not supported".to_string())) })
     }
+}
+
+fn is_destructive_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "move_roms" | "delete_roms")
 }
 
 fn execute_tool(tool_name: &str, args: Value) -> Value {
@@ -471,7 +552,9 @@ mod tests {
     #[tokio::test]
     async fn lists_required_tools_with_schemas_and_preserves_request_id() {
         let response = handle_request(
-            CleanMameRouter,
+            CleanMameRouter {
+                destructive_tools_allowed: true,
+            },
             JsonRpcRequest::new(Some(42), "tools/list", None),
         )
         .await;
@@ -491,6 +574,18 @@ mod tests {
             json!(["rom_folder", "mame_xml"])
         );
         assert!(tools.iter().any(|tool| tool["name"] == "generate_report"));
+    }
+
+    #[tokio::test]
+    async fn responds_accepted_to_notifications() {
+        let response = mcp_handler(
+            State(AppState { auth_token: None }),
+            HeaderMap::new(),
+            Json(JsonRpcRequest::new(None, "notifications/initialized", None)),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
     }
 
     #[test]
@@ -537,5 +632,36 @@ mod tests {
 
         assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
         std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn requires_bearer_authentication_for_destructive_tools() {
+        let state = AppState {
+            auth_token: Some(Arc::from("token")),
+        };
+        let mut headers = HeaderMap::new();
+
+        assert!(!router_for_request(&state, &headers).destructive_tools_allowed);
+        assert!(
+            router_for_request(&state, &headers)
+                .list_tools()
+                .iter()
+                .all(|tool| !is_destructive_tool(&tool.name))
+        );
+        headers.insert(
+            header::AUTHORIZATION,
+            ["Bearer", "token"].join(" ").parse().unwrap(),
+        );
+        assert!(router_for_request(&state, &headers).destructive_tools_allowed);
+    }
+
+    #[test]
+    fn only_accepts_local_websocket_origins() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ORIGIN, "https://example.com".parse().unwrap());
+        assert!(!has_trusted_origin(&headers));
+
+        headers.insert(header::ORIGIN, "http://localhost:3000".parse().unwrap());
+        assert!(has_trusted_origin(&headers));
     }
 }

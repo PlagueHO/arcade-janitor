@@ -21,6 +21,10 @@ pub fn filter_roms(roms: &[RomEntry], options: &FilterOptions) -> Vec<RomEntry> 
 }
 
 fn matches_options(rom: &RomEntry, options: &FilterOptions) -> bool {
+    if !rom.metadata.flags.runnable {
+        return false;
+    }
+
     if options.only_available && rom.rom_path.is_none() {
         return false;
     }
@@ -80,6 +84,26 @@ mod tests {
             metadata: RomMetadata {
                 flags: Flags {
                     mature: true,
+                    ..Flags::default()
+                },
+                ..RomMetadata::default()
+            },
+            rom_path: None,
+        }];
+
+        assert!(filter_roms(&roms, &FilterOptions::default()).is_empty());
+    }
+
+    #[test]
+    fn excludes_non_runnable_roms() {
+        let roms = vec![RomEntry {
+            name: "bios".to_string(),
+            description: None,
+            year: None,
+            manufacturer: None,
+            metadata: RomMetadata {
+                flags: Flags {
+                    runnable: false,
                     ..Flags::default()
                 },
                 ..RomMetadata::default()

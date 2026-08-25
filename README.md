@@ -35,6 +35,10 @@ Endpoints:
 - `POST /mcp` (MCP JSON-RPC)
 - `GET /ws`
 
+Set `CLEANMAME_MCP_TOKEN` to enable the destructive MCP tools; without it, those tools are
+unavailable. Clients must authenticate using the standard HTTP authorization header. WebSocket
+connections from non-local browser origins are rejected.
+
 ## Development
 
 ```bash
