@@ -41,6 +41,13 @@ connections from non-local browser origins are rejected.
 
 ## Development
 
+### Dev Container
+
+Open this repository in VS Code and run **Dev Containers: Reopen in Container** to
+use the checked-in Rust development environment. It installs the stable Rust
+toolchain with `rustfmt`, `clippy`, and `rust-src`, GitHub CLI, and the
+workspace's recommended extensions. The MCP API is forwarded on port `3000`.
+
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
