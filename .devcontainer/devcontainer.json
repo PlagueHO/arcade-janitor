@@ -10,8 +10,7 @@
     "ghcr.io/devcontainers/features/rust:1": {
       "version": "stable",
       "profile": "minimal",
-      "targets": "x86_64-unknown-linux-gnu",
-      "components": "rustfmt,clippy,rust-src"
+      "components": "rust-analyzer,rustfmt,clippy,rust-src"
     },
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },

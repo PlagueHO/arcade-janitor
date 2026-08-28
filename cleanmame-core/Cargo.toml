@@ -6,8 +6,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+dirs-next.workspace = true
 ini.workspace = true
 quick-xml.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing-subscriber.workspace = true

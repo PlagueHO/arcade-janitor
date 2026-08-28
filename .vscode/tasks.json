@@ -1,0 +1,183 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build: Workspace",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "--workspace"],
+      "group": "build",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "gear",
+        "color": "terminal.ansiBlue"
+      }
+    },
+    {
+      "label": "Build: cleanmame-core",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "-p", "cleanmame-core"],
+      "group": "build",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "gear",
+        "color": "terminal.ansiBlue"
+      }
+    },
+    {
+      "label": "Build: cleanmame-cli",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "-p", "cleanmame-cli"],
+      "group": "build",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "gear",
+        "color": "terminal.ansiBlue"
+      }
+    },
+    {
+      "label": "Build: cleanmame-mcp",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "-p", "cleanmame-mcp"],
+      "group": "build",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "gear",
+        "color": "terminal.ansiBlue"
+      }
+    },
+    {
+      "label": "Package: Workspace",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["package", "--workspace"],
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "package",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Package: cleanmame-core",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["package", "-p", "cleanmame-core"],
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "package",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Package: cleanmame-cli",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["package", "-p", "cleanmame-cli"],
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "package",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Package: cleanmame-mcp",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["package", "-p", "cleanmame-mcp"],
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "package",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Run: cleanmame-cli",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run", "-p", "cleanmame-cli", "--", "--help"],
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "play",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Run: cleanmame-mcp",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run", "-p", "cleanmame-mcp"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "cleanmame-mcp",
+        "pattern": {
+          "regexp": ".*"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*CleanMAME MCP server listening.*",
+          "endsPattern": ".*CleanMAME MCP server listening.*"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": false
+      },
+      "icon": {
+        "id": "play",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Test: Workspace",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "--workspace"],
+      "group": "test",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "beaker",
+        "color": "terminal.ansiYellow"
+      }
+    },
+    {
+      "label": "Test: cleanmame-core",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "-p", "cleanmame-core"],
+      "group": "test",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "beaker",
+        "color": "terminal.ansiYellow"
+      }
+    },
+    {
+      "label": "Test: cleanmame-cli",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "-p", "cleanmame-cli"],
+      "group": "test",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "beaker",
+        "color": "terminal.ansiYellow"
+      }
+    },
+    {
+      "label": "Test: cleanmame-mcp",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "-p", "cleanmame-mcp"],
+      "group": "test",
+      "problemMatcher": "$rustc",
+      "icon": {
+        "id": "beaker",
+        "color": "terminal.ansiYellow"
+      }
+    }
+  ]
+}

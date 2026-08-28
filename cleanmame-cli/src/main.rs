@@ -1,21 +1,19 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use cleanmame_core::{
     Region,
+    metadata::{resolve_catver_path, resolve_mame_xml_path},
     operations::{
         delete::delete_roms,
         filter::{FilterOptions, filter_roms},
         r#move::move_roms,
-        query::{
-            find_by_name, load_metadata, load_metadata_from_str, scan_rom_folder_with_entries,
-        },
+        query::{find_by_name, load_metadata, scan_rom_folder_with_entries},
         report::generate_report,
     },
 };
 use serde::Serialize;
-use tokio::process::Command;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -213,30 +211,10 @@ async fn filter_from_args(args: &FilterArgs) -> Result<Vec<cleanmame_core::RomEn
 }
 
 async fn metadata_entries(args: &MetadataOnlyArgs) -> Result<Vec<cleanmame_core::RomEntry>> {
-    if let Some(mame_xml) = &args.mame_xml {
-        return load_metadata(mame_xml, args.catver.as_deref()).map_err(Into::into);
-    }
-
-    let executable = args
-        .mame_executable
-        .as_ref()
-        .context("--mame-xml or --mame-executable is required")?;
-    let output = Command::new(executable)
-        .arg("-listxml")
-        .output()
-        .await
-        .with_context(|| format!("failed to run {} -listxml", executable.display()))?;
-
-    if !output.status.success() {
-        bail!(
-            "{} -listxml exited with {}",
-            executable.display(),
-            output.status
-        );
-    }
-
-    let xml = String::from_utf8(output.stdout).context("MAME -listxml output was not UTF-8")?;
-    load_metadata_from_str(&xml, args.catver.as_deref()).map_err(Into::into)
+    let catver = resolve_catver_path(args.catver.as_deref())?;
+    let mame_xml =
+        resolve_mame_xml_path(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
+    load_metadata(mame_xml, Some(&catver)).map_err(Into::into)
 }
 
 fn output<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> String) -> Result<()> {

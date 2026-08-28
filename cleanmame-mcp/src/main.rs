@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use cleanmame_core::metadata::{resolve_catver_path, resolve_mame_xml_path};
 use cleanmame_core::operations::{
     delete::delete_roms,
     filter::{FilterOptions, filter_roms},
@@ -365,7 +366,10 @@ fn execute_tool(tool_name: &str, args: Value) -> Value {
 
 fn scan_roms(args: Value) -> Value {
     match parse_metadata_args(args).and_then(|args| {
-        scan_rom_folder(args.rom_folder, args.mame_xml, args.catver).map_err(anyhow::Error::from)
+        let catver = resolve_catver_path(args.catver.as_deref())?;
+        let mame_xml =
+            resolve_mame_xml_path(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
+        scan_rom_folder(args.rom_folder, mame_xml, Some(catver)).map_err(anyhow::Error::from)
     }) {
         Ok(roms) => json!({ "ok": true, "roms": roms }),
         Err(error) => json!({ "ok": false, "error": error.to_string() }),
@@ -374,7 +378,10 @@ fn scan_roms(args: Value) -> Value {
 
 fn query_metadata(args: Value) -> Value {
     match parse_query_args(args).and_then(|args| {
-        let roms = load_metadata(args.mame_xml, args.catver.as_deref())?;
+        let catver = resolve_catver_path(args.catver.as_deref())?;
+        let mame_xml =
+            resolve_mame_xml_path(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
+        let roms = load_metadata(mame_xml, Some(catver))?;
         find_by_name(&roms, &args.name)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("ROM '{}' was not found", args.name))
@@ -388,11 +395,12 @@ fn filter_roms_tool(args: Value) -> Value {
     match parse_filter_args(args).and_then(|args| {
         let mut options = args.options;
         options.only_available = true;
-        let roms = scan_rom_folder(
-            args.metadata.rom_folder,
-            args.metadata.mame_xml,
-            args.metadata.catver,
+        let catver = resolve_catver_path(args.metadata.catver.as_deref())?;
+        let mame_xml = resolve_mame_xml_path(
+            args.metadata.mame_xml.as_deref(),
+            args.metadata.mame_executable.as_deref(),
         )?;
+        let roms = scan_rom_folder(args.metadata.rom_folder, mame_xml, Some(catver))?;
         Ok::<_, anyhow::Error>(filter_roms(&roms, &options))
     }) {
         Ok(roms) => json!({ "ok": true, "roms": roms }),
@@ -404,11 +412,12 @@ fn move_roms_tool(args: Value) -> Value {
     match parse_move_args(args).and_then(|args| {
         let mut options = args.filter.options;
         options.only_available = true;
-        let roms = scan_rom_folder(
-            args.filter.metadata.rom_folder,
-            args.filter.metadata.mame_xml,
-            args.filter.metadata.catver,
+        let catver = resolve_catver_path(args.filter.metadata.catver.as_deref())?;
+        let mame_xml = resolve_mame_xml_path(
+            args.filter.metadata.mame_xml.as_deref(),
+            args.filter.metadata.mame_executable.as_deref(),
         )?;
+        let roms = scan_rom_folder(args.filter.metadata.rom_folder, mame_xml, Some(catver))?;
         let filtered = filter_roms(&roms, &options);
         move_roms(&filtered, args.target_folder, args.dry_run).map_err(anyhow::Error::from)
     }) {
@@ -421,11 +430,12 @@ fn delete_roms_tool(args: Value) -> Value {
     match parse_delete_args(args).and_then(|args| {
         let mut options = args.filter.options;
         options.only_available = true;
-        let roms = scan_rom_folder(
-            args.filter.metadata.rom_folder,
-            args.filter.metadata.mame_xml,
-            args.filter.metadata.catver,
+        let catver = resolve_catver_path(args.filter.metadata.catver.as_deref())?;
+        let mame_xml = resolve_mame_xml_path(
+            args.filter.metadata.mame_xml.as_deref(),
+            args.filter.metadata.mame_executable.as_deref(),
         )?;
+        let roms = scan_rom_folder(args.filter.metadata.rom_folder, mame_xml, Some(catver))?;
         let filtered = filter_roms(&roms, &options);
         delete_roms(&filtered, args.dry_run).map_err(anyhow::Error::from)
     }) {
@@ -436,7 +446,10 @@ fn delete_roms_tool(args: Value) -> Value {
 
 fn generate_report_tool(args: Value) -> Value {
     match parse_metadata_args(args).and_then(|args| {
-        scan_rom_folder(args.rom_folder, args.mame_xml, args.catver).map_err(anyhow::Error::from)
+        let catver = resolve_catver_path(args.catver.as_deref())?;
+        let mame_xml =
+            resolve_mame_xml_path(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
+        scan_rom_folder(args.rom_folder, mame_xml, Some(catver)).map_err(anyhow::Error::from)
     }) {
         Ok(roms) => json!({ "ok": true, "report": generate_report(&roms) }),
         Err(error) => json!({ "ok": false, "error": error.to_string() }),
@@ -499,10 +512,11 @@ fn metadata_schema() -> Value {
         "type": "object",
         "properties": {
             "rom_folder": { "type": "string" },
-            "mame_xml": { "type": "string" },
+            "mame_xml": { "type": ["string", "null"] },
+            "mame_executable": { "type": ["string", "null"] },
             "catver": { "type": ["string", "null"] }
         },
-        "required": ["rom_folder", "mame_xml"],
+        "required": ["rom_folder"],
         "additionalProperties": false
     })
 }
@@ -512,10 +526,11 @@ fn query_schema() -> Value {
         "type": "object",
         "properties": {
             "name": { "type": "string" },
-            "mame_xml": { "type": "string" },
+            "mame_xml": { "type": ["string", "null"] },
+            "mame_executable": { "type": ["string", "null"] },
             "catver": { "type": ["string", "null"] }
         },
-        "required": ["name", "mame_xml"],
+        "required": ["name"],
         "additionalProperties": false
     })
 }
@@ -587,7 +602,8 @@ fn delete_schema() -> Value {
 #[serde(deny_unknown_fields)]
 struct MetadataArgs {
     rom_folder: PathBuf,
-    mame_xml: PathBuf,
+    mame_xml: Option<PathBuf>,
+    mame_executable: Option<PathBuf>,
     catver: Option<PathBuf>,
 }
 
@@ -595,7 +611,8 @@ struct MetadataArgs {
 #[serde(deny_unknown_fields)]
 struct QueryArgs {
     name: String,
-    mame_xml: PathBuf,
+    mame_xml: Option<PathBuf>,
+    mame_executable: Option<PathBuf>,
     catver: Option<PathBuf>,
 }
 
@@ -648,10 +665,7 @@ mod tests {
             .iter()
             .find(|tool| tool["name"] == "scan_roms")
             .unwrap();
-        assert_eq!(
-            scan["inputSchema"]["required"],
-            json!(["rom_folder", "mame_xml"])
-        );
+        assert_eq!(scan["inputSchema"]["required"], json!(["rom_folder"]));
         assert!(tools.iter().any(|tool| tool["name"] == "generate_report"));
     }
 
@@ -676,6 +690,7 @@ mod tests {
         let rom_folder = folder.join("roms");
         let target_folder = folder.join("target");
         let mame_xml = folder.join("mame.xml");
+        let catver = folder.join("catver.ini");
         std::fs::create_dir_all(&rom_folder).unwrap();
         std::fs::write(rom_folder.join("available.zip"), "").unwrap();
         std::fs::write(
@@ -683,6 +698,7 @@ mod tests {
             r#"<mame><machine name="available"></machine><machine name="missing"></machine></mame>"#,
         )
         .unwrap();
+        std::fs::write(&catver, "[Category]\navailable=Maze / Chase\n").unwrap();
 
         let response = execute_tool(
             "move_roms",
@@ -690,7 +706,8 @@ mod tests {
                 "filter": {
                     "metadata": {
                         "rom_folder": rom_folder,
-                        "mame_xml": mame_xml
+                        "mame_xml": mame_xml,
+                        "catver": catver
                     }
                 },
                 "target_folder": target_folder,
@@ -705,7 +722,8 @@ mod tests {
                 "filter": {
                     "metadata": {
                         "rom_folder": rom_folder,
-                        "mame_xml": mame_xml
+                        "mame_xml": mame_xml,
+                        "catver": catver
                     }
                 },
                 "dry_run": true

@@ -1,6 +1,7 @@
 //! Shared library for CleanMAME metadata parsing and ROM folder operations.
 
 pub mod errors;
+pub mod metadata;
 pub mod models;
 pub mod operations;
 pub mod parsers;
