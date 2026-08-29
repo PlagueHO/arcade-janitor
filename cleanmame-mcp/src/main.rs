@@ -1,4 +1,6 @@
-use std::{future::Future, net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc};
+use std::{
+    collections::BTreeMap, future::Future, net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc,
+};
 
 use axum::{
     Json, Router,
@@ -10,7 +12,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use cleanmame_core::metadata::{resolve_catver_path, resolve_mame_xml_path};
+use cleanmame_core::metadata::{
+    MameXmlSource, resolve_catver_path, resolve_mame_xml, resolve_mame_xml_path,
+};
 use cleanmame_core::operations::{
     delete::delete_roms,
     filter::{FilterOptions, filter_roms},
@@ -277,7 +281,7 @@ impl McpRouter for CleanMameRouter {
     }
 
     fn instructions(&self) -> String {
-        "Scan, query, filter, move, delete, and report on MAME ROMs.".to_string()
+        "Manage ROM folders; inspect, query, and filter MAME XML metadata; and list and query catver categories, subcategories, and entries.".to_string()
     }
 
     fn capabilities(&self) -> ServerCapabilities {
@@ -357,9 +361,12 @@ fn execute_tool(tool_name: &str, args: Value) -> Value {
         "scan_roms" => scan_roms(args),
         "query_metadata" => query_metadata(args),
         "filter_roms" => filter_roms_tool(args),
+        "show_mame_xml" => show_mame_xml_tool(args),
+        "filter_mame_metadata" => filter_mame_metadata_tool(args),
         "move_roms" => move_roms_tool(args),
         "delete_roms" => delete_roms_tool(args),
         "generate_report" => generate_report_tool(args),
+        "list_catver" => list_catver_tool(args),
         _ => json!({ "ok": false, "error": format!("unknown tool '{tool_name}'") }),
     }
 }
@@ -405,6 +412,53 @@ fn filter_roms_tool(args: Value) -> Value {
     }) {
         Ok(roms) => json!({ "ok": true, "roms": roms }),
         Err(error) => json!({ "ok": false, "error": error.to_string() }),
+    }
+}
+
+fn show_mame_xml_tool(args: Value) -> Value {
+    match parse_mame_xml_args(args).and_then(|args| {
+        let mame_xml = resolve_mame_xml(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
+        let metadata = std::fs::metadata(&mame_xml.path)?;
+        let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?;
+        Ok::<_, anyhow::Error>(json!({
+            "ok": true,
+            "mame_xml": {
+                "path": mame_xml.path,
+                "source": describe_mame_xml_source(&mame_xml.source),
+                "size_bytes": metadata.len(),
+                "modified_unix_seconds": modified.as_secs()
+            }
+        }))
+    }) {
+        Ok(result) => result,
+        Err(error) => json!({ "ok": false, "error": error.to_string() }),
+    }
+}
+
+fn filter_mame_metadata_tool(args: Value) -> Value {
+    match parse_mame_filter_args(args).and_then(|args| {
+        let mut options = args.options;
+        options.only_available = false;
+        let catver = resolve_catver_path(args.metadata.catver.as_deref())?;
+        let mame_xml = resolve_mame_xml_path(
+            args.metadata.mame_xml.as_deref(),
+            args.metadata.mame_executable.as_deref(),
+        )?;
+        let roms = load_metadata(mame_xml, Some(catver))?;
+        Ok::<_, anyhow::Error>(filter_roms(&roms, &options))
+    }) {
+        Ok(roms) => json!({ "ok": true, "roms": roms }),
+        Err(error) => json!({ "ok": false, "error": error.to_string() }),
+    }
+}
+
+fn describe_mame_xml_source(source: &MameXmlSource) -> String {
+    match source {
+        MameXmlSource::ExplicitPath => "explicit path".to_string(),
+        MameXmlSource::ExtractedFrom(executable) => {
+            format!("extracted from {}", executable.display())
+        }
+        MameXmlSource::Cache => "CleanMAME cache".to_string(),
     }
 }
 
@@ -456,6 +510,87 @@ fn generate_report_tool(args: Value) -> Value {
     }
 }
 
+fn list_catver_tool(args: Value) -> Value {
+    match parse_catver_args(args).and_then(|args| {
+        let catver = resolve_catver_path(args.catver.as_deref())?;
+        let mut entries = cleanmame_core::parsers::catver::parse_catver_file(catver)?
+            .into_iter()
+            .map(|(name, genre)| CatverEntry {
+                name,
+                category: genre.category,
+                subcategory: genre.subcategory,
+            })
+            .filter(|entry| catver_entry_matches(entry, args.query.as_deref()))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.name.cmp(&right.name));
+
+        Ok::<_, anyhow::Error>(match args.list {
+            CatverList::Categories => {
+                let categories = catver_categories(&entries);
+                json!({ "ok": true, "list": "categories", "total": categories.len(), "entries": categories })
+            }
+            CatverList::Subcategories => {
+                let subcategories = catver_subcategories(&entries);
+                json!({ "ok": true, "list": "subcategories", "total": subcategories.len(), "entries": subcategories })
+            }
+            CatverList::Entries => {
+                json!({ "ok": true, "list": "entries", "total": entries.len(), "entries": entries })
+            }
+        })
+    }) {
+        Ok(result) => result,
+        Err(error) => json!({ "ok": false, "error": error.to_string() }),
+    }
+}
+
+fn catver_entry_matches(entry: &CatverEntry, query: Option<&str>) -> bool {
+    let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
+        return true;
+    };
+    let query = query.to_ascii_lowercase();
+    entry.name.to_ascii_lowercase().contains(&query)
+        || entry.category.to_ascii_lowercase().contains(&query)
+        || entry
+            .subcategory
+            .as_deref()
+            .is_some_and(|subcategory| subcategory.to_ascii_lowercase().contains(&query))
+}
+
+fn catver_categories(entries: &[CatverEntry]) -> Vec<CatverCategory> {
+    entries
+        .iter()
+        .fold(BTreeMap::new(), |mut counts, entry| {
+            *counts.entry(entry.category.clone()).or_default() += 1;
+            counts
+        })
+        .into_iter()
+        .map(|(category, rom_count)| CatverCategory {
+            category,
+            rom_count,
+        })
+        .collect()
+}
+
+fn catver_subcategories(entries: &[CatverEntry]) -> Vec<CatverSubcategory> {
+    entries
+        .iter()
+        .fold(BTreeMap::new(), |mut counts, entry| {
+            if let Some(subcategory) = &entry.subcategory {
+                *counts
+                    .entry((entry.category.clone(), subcategory.clone()))
+                    .or_default() += 1;
+            }
+            counts
+        })
+        .into_iter()
+        .map(|((category, subcategory), rom_count)| CatverSubcategory {
+            category,
+            subcategory,
+            rom_count,
+        })
+        .collect()
+}
+
 fn parse_metadata_args(args: Value) -> anyhow::Result<MetadataArgs> {
     serde_json::from_value(args).map_err(Into::into)
 }
@@ -468,11 +603,23 @@ fn parse_filter_args(args: Value) -> anyhow::Result<FilterArgs> {
     serde_json::from_value(args).map_err(Into::into)
 }
 
+fn parse_mame_xml_args(args: Value) -> anyhow::Result<MameXmlArgs> {
+    serde_json::from_value(args).map_err(Into::into)
+}
+
+fn parse_mame_filter_args(args: Value) -> anyhow::Result<MameFilterArgs> {
+    serde_json::from_value(args).map_err(Into::into)
+}
+
 fn parse_move_args(args: Value) -> anyhow::Result<MoveArgs> {
     serde_json::from_value(args).map_err(Into::into)
 }
 
 fn parse_delete_args(args: Value) -> anyhow::Result<DeleteArgs> {
+    serde_json::from_value(args).map_err(Into::into)
+}
+
+fn parse_catver_args(args: Value) -> anyhow::Result<CatverArgs> {
     serde_json::from_value(args).map_err(Into::into)
 }
 
@@ -494,6 +641,16 @@ fn tools() -> Vec<Tool> {
             filter_schema(),
         ),
         Tool::new(
+            "show_mame_xml",
+            "Show the resolved MAME XML source and file details",
+            mame_xml_schema(),
+        ),
+        Tool::new(
+            "filter_mame_metadata",
+            "Filter MAME XML metadata without requiring a ROM folder",
+            mame_filter_schema(),
+        ),
+        Tool::new(
             "move_roms",
             "Move filtered ROM files to a target folder",
             move_schema(),
@@ -503,6 +660,11 @@ fn tools() -> Vec<Tool> {
             "generate_report",
             "Generate a simple metadata report",
             metadata_schema(),
+        ),
+        Tool::new(
+            "list_catver",
+            "List catver categories, subcategories, or ROM category entries",
+            catver_schema(),
         ),
     ]
 }
@@ -535,6 +697,41 @@ fn query_schema() -> Value {
     })
 }
 
+fn mame_xml_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "mame_xml": { "type": ["string", "null"] },
+            "mame_executable": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+    })
+}
+
+fn mame_filter_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "metadata": mame_metadata_schema(),
+            "options": filter_options_schema()
+        },
+        "required": ["metadata"],
+        "additionalProperties": false
+    })
+}
+
+fn mame_metadata_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "mame_xml": { "type": ["string", "null"] },
+            "mame_executable": { "type": ["string", "null"] },
+            "catver": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+    })
+}
+
 fn filter_schema() -> Value {
     json!({
         "type": "object",
@@ -552,6 +749,13 @@ fn filter_options_schema() -> Value {
         "type": "object",
         "properties": {
             "genre_contains": { "type": ["string", "null"] },
+            "names": { "type": "array", "items": { "type": "string" } },
+            "genres": { "type": "array", "items": { "type": "string" } },
+            "categories": { "type": "array", "items": { "type": "string" } },
+            "subcategories": { "type": "array", "items": { "type": "string" } },
+            "manufacturers": { "type": "array", "items": { "type": "string" } },
+            "year_from": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
+            "year_to": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
             "region": {
                 "oneOf": [
                     { "enum": ["Usa", "Japan", "Europe", "World", "Asia", "Unknown"] },
@@ -564,9 +768,25 @@ fn filter_options_schema() -> Value {
                     { "type": "null" }
                 ]
             },
+            "regions": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        { "enum": ["Usa", "Japan", "Europe", "World", "Asia", "Unknown"] },
+                        {
+                            "type": "object",
+                            "properties": { "Other": { "type": "string" } },
+                            "required": ["Other"],
+                            "additionalProperties": false
+                        }
+                    ]
+                }
+            },
             "include_mature": { "type": "boolean" },
             "include_mechanical": { "type": "boolean" },
             "include_prototype": { "type": "boolean" },
+            "include_non_runnable": { "type": "boolean" },
+            "include_uncatalogued": { "type": "boolean" },
             "only_available": { "type": "boolean" }
         },
         "additionalProperties": false
@@ -598,6 +818,18 @@ fn delete_schema() -> Value {
     })
 }
 
+fn catver_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "catver": { "type": ["string", "null"] },
+            "query": { "type": ["string", "null"] },
+            "list": { "enum": ["categories", "subcategories", "entries"] }
+        },
+        "additionalProperties": false
+    })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MetadataArgs {
@@ -611,6 +843,29 @@ struct MetadataArgs {
 #[serde(deny_unknown_fields)]
 struct QueryArgs {
     name: String,
+    mame_xml: Option<PathBuf>,
+    mame_executable: Option<PathBuf>,
+    catver: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MameXmlArgs {
+    mame_xml: Option<PathBuf>,
+    mame_executable: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MameFilterArgs {
+    metadata: QueryMetadataArgs,
+    #[serde(default)]
+    options: FilterOptions,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryMetadataArgs {
     mame_xml: Option<PathBuf>,
     mame_executable: Option<PathBuf>,
     catver: Option<PathBuf>,
@@ -641,6 +896,44 @@ struct DeleteArgs {
     dry_run: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatverArgs {
+    catver: Option<PathBuf>,
+    query: Option<String>,
+    #[serde(default)]
+    list: CatverList,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CatverList {
+    #[default]
+    Categories,
+    Subcategories,
+    Entries,
+}
+
+#[derive(Serialize)]
+struct CatverEntry {
+    name: String,
+    category: String,
+    subcategory: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CatverCategory {
+    category: String,
+    rom_count: usize,
+}
+
+#[derive(Serialize)]
+struct CatverSubcategory {
+    category: String,
+    subcategory: String,
+    rom_count: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,6 +960,13 @@ mod tests {
             .unwrap();
         assert_eq!(scan["inputSchema"]["required"], json!(["rom_folder"]));
         assert!(tools.iter().any(|tool| tool["name"] == "generate_report"));
+        assert!(tools.iter().any(|tool| tool["name"] == "list_catver"));
+        assert!(tools.iter().any(|tool| tool["name"] == "show_mame_xml"));
+        assert!(
+            tools
+                .iter()
+                .any(|tool| tool["name"] == "filter_mame_metadata")
+        );
     }
 
     #[tokio::test]
@@ -731,6 +1031,79 @@ mod tests {
         );
 
         assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn lists_filtered_catver_subcategories() {
+        let folder =
+            std::env::temp_dir().join(format!("cleanmame-mcp-catver-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let catver = folder.join("catver.ini");
+        std::fs::write(
+            &catver,
+            "[Category]\ngalaga=Shooter / Flying Vertical\ngalaxian=Shooter / Flying Horizontal\npacman=Maze / Chase\n",
+        )
+        .unwrap();
+
+        let response = execute_tool(
+            "list_catver",
+            json!({
+                "catver": catver,
+                "query": "vertical",
+                "list": "subcategories"
+            }),
+        );
+
+        assert_eq!(
+            response,
+            json!({
+                "ok": true,
+                "list": "subcategories",
+                "total": 1,
+                "entries": [{
+                    "category": "Shooter",
+                    "subcategory": "Flying Vertical",
+                    "rom_count": 1
+                }]
+            })
+        );
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn shows_and_filters_mame_metadata_without_a_rom_folder() {
+        let folder =
+            std::env::temp_dir().join(format!("cleanmame-mcp-mame-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mame_xml = folder.join("mame.xml");
+        let catver = folder.join("catver.ini");
+        std::fs::write(
+            &mame_xml,
+            r#"<mame><machine name="pacman"><description>Pac-Man</description></machine><machine name="galaga"><description>Galaga</description></machine></mame>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &catver,
+            "[Category]\npacman=Maze / Chase\ngalaga=Shooter / Flying Vertical\n",
+        )
+        .unwrap();
+
+        let show = execute_tool("show_mame_xml", json!({ "mame_xml": mame_xml }));
+        assert_eq!(show["ok"], true);
+        assert_eq!(show["mame_xml"]["source"], "explicit path");
+        assert!(show["mame_xml"]["size_bytes"].as_u64().is_some());
+
+        let filtered = execute_tool(
+            "filter_mame_metadata",
+            json!({
+                "metadata": { "mame_xml": mame_xml, "catver": catver },
+                "options": { "genre_contains": "shooter" }
+            }),
+        );
+        assert_eq!(filtered["ok"], true);
+        assert_eq!(filtered["roms"][0]["name"], "galaga");
+        assert_eq!(filtered["roms"].as_array().unwrap().len(), 1);
         std::fs::remove_dir_all(folder).unwrap();
     }
 

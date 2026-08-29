@@ -10,7 +10,10 @@ CleanMAME is a focused Rust CLI and MCP server for managing MAME ROM folders usi
 
 ## v1 scope
 
-CleanMAME v1 supports MAME ROM folders, `mame.xml`, `catver.ini`, metadata queries, filtering, moving, deleting, and simple reports. It intentionally excludes CHDs, BIOS dependency resolution, scraping, GUI, dashboards, cloud sync, plugins, and non-MAME systems.
+CleanMAME v1 supports MAME ROM folders, `mame.xml`, `catver.ini`, catalog queries,
+collection filtering and auditing, statistics, moving, deleting, and metadata cache
+management. It intentionally excludes CHDs, BIOS dependency resolution, scraping, GUI,
+dashboards, cloud sync, plugins, and non-MAME systems.
 
 `--catver` is optional. When it is omitted, CleanMAME downloads
 [`catver.ini`](https://github.com/AntoPISA/MAME_SupportFiles/tree/main/catver.ini) from the
@@ -21,16 +24,51 @@ When `--mame-executable <path>` is supplied without `--mame-xml`, CleanMAME runs
 `mame.exe -listxml` and caches the result in the current user's OS cache directory.
 The cached XML is reused when no XML path or executable is provided.
 
-## Examples
+## CLI
+
+CleanMAME uses a resource-first command structure:
+
+```text
+cleanmame
+├── rom        list, show, move, delete, stats, audit
+├── catalog    list, show
+├── category   list, show
+├── source     list, refresh, clear
+└── completions
+```
+
+Use `cleanmame <resource> --help` and
+`cleanmame <resource> <command> --help` to discover commands and options.
+
+### Examples
 
 ```bash
-cargo run -p cleanmame-cli -- scan --rom-folder ./roms --mame-xml ./mame.xml --catver ./catver.ini
-cargo run -p cleanmame-cli -- query --name pacman --mame-xml ./mame.xml --catver ./catver.ini --json
-cargo run -p cleanmame-cli -- filter --rom-folder ./roms --mame-xml ./mame.xml --catver ./catver.ini --genre maze
-cargo run -p cleanmame-cli -- move --rom-folder ./roms --mame-xml ./mame.xml --catver ./catver.ini --genre maze --target-folder ./filtered --dry-run
-cargo run -p cleanmame-cli -- delete --rom-folder ./roms --mame-xml ./mame.xml --catver ./catver.ini --genre mature --include-mature --dry-run
-cargo run -p cleanmame-cli -- report --rom-folder ./roms --mame-xml ./mame.xml --catver ./catver.ini --json
+cargo run -p cleanmame-cli -- rom list ./roms --genre maze --mame-xml ./mame.xml --catver ./catver.ini
+cargo run -p cleanmame-cli -- rom show ./roms pacman --mame-xml ./mame.xml --catver ./catver.ini
+cargo run -p cleanmame-cli -- catalog show pacman --mame-xml ./mame.xml --catver ./catver.ini --output json
+cargo run -p cleanmame-cli -- catalog list --manufacturer Namco --year 1980..1985 --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- category show Shooter --subcategory vertical --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- rom move ./roms ./filtered --genre maze --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- rom move ./roms ./filtered --genre maze --execute --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- rom delete ./roms --name "prototype*" --execute --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- rom stats ./roms --output json --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- rom stats ./roms --category Shooter --subcategory "Flying Vertical" --show-missing --output json --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- rom audit ./roms --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- source list --output table
+cargo run -p cleanmame-cli -- completions powershell
 ```
+
+`rom move`, `rom delete`, and `source clear` only preview their operations unless
+`--execute` is present. ROM mutations also require at least one selector or explicit
+`--all`.
+
+All list-like commands support table, JSON, and TSV output with `--output`. Use
+`--no-header` for headerless table or TSV output. Result data is written to stdout;
+progress and diagnostics are written to stderr.
+
+The source options `--mame-xml`, `--mame-executable`, and `--catver` are global and can
+appear before or after a subcommand. Their environment variable equivalents are
+`CLEANMAME_MAME_XML`, `CLEANMAME_MAME_EXECUTABLE`, and `CLEANMAME_CATVER`.
 
 Start the MCP server:
 

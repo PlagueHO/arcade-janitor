@@ -40,8 +40,8 @@
     {
       "label": "Build: cleanmame-mcp",
       "type": "shell",
-      "command": "cargo",
-      "args": ["build", "-p", "cleanmame-mcp"],
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1", "build", "-p", "cleanmame-mcp"],
       "group": "build",
       "problemMatcher": "$rustc",
       "icon": {

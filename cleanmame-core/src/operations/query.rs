@@ -43,7 +43,15 @@ pub fn scan_rom_folder(
 
 pub fn scan_rom_folder_with_entries(
     rom_folder: impl AsRef<Path>,
+    roms: Vec<RomEntry>,
+) -> Result<Vec<RomEntry>> {
+    scan_rom_folder_with_entries_and_progress(rom_folder, roms, |_, _| {})
+}
+
+pub fn scan_rom_folder_with_entries_and_progress(
+    rom_folder: impl AsRef<Path>,
     mut roms: Vec<RomEntry>,
+    mut on_progress: impl FnMut(u64, u64),
 ) -> Result<Vec<RomEntry>> {
     let mut by_name: HashMap<String, usize> = roms
         .iter()
@@ -51,18 +59,23 @@ pub fn scan_rom_folder_with_entries(
         .map(|(index, entry)| (entry.name.to_ascii_lowercase(), index))
         .collect();
 
-    for path in list_rom_files(rom_folder)? {
+    let paths = list_rom_files(rom_folder)?;
+    let total = paths.len() as u64;
+    on_progress(0, total);
+    for (index, path) in paths.into_iter().enumerate() {
         if let Some(name) = rom_name_from_path(&path) {
             if let Some(index) = by_name.get(&name) {
                 roms[*index].rom_path = Some(path);
             } else {
                 let mut entry = RomEntry::new(&name);
                 entry.metadata.flags.runnable = false;
+                entry.catalogued = false;
                 entry.rom_path = Some(path);
                 by_name.insert(name, roms.len());
                 roms.push(entry);
             }
         }
+        on_progress(index as u64 + 1, total);
     }
 
     Ok(roms)

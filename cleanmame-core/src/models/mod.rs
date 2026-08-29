@@ -10,6 +10,12 @@ pub struct RomEntry {
     pub manufacturer: Option<String>,
     pub metadata: RomMetadata,
     pub rom_path: Option<PathBuf>,
+    #[serde(default = "catalogued_by_default")]
+    pub catalogued: bool,
+}
+
+fn catalogued_by_default() -> bool {
+    true
 }
 
 impl RomEntry {
@@ -21,6 +27,7 @@ impl RomEntry {
             manufacturer: None,
             metadata: RomMetadata::default(),
             rom_path: None,
+            catalogued: true,
         }
     }
 }
