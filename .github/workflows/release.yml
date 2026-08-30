@@ -23,8 +23,8 @@ jobs:
           - os: windows-latest
             platform: windows
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -33,6 +33,14 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          tap_dir="$(brew --repository)/Library/Taps/aws/homebrew-tap"
+          if [[ -d "$tap_dir" ]]; then
+            brew untap aws/tap
+          fi
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
@@ -78,7 +86,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: CHANGELOG.md
       - uses: actions/download-artifact@v4

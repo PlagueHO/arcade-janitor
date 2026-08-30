@@ -16,8 +16,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -26,6 +26,14 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          tap_dir="$(brew --repository)/Library/Taps/aws/homebrew-tap"
+          if [[ -d "$tap_dir" ]]; then
+            brew untap aws/tap
+          fi
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
@@ -33,4 +41,9 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Run integration tests
+        run: |
+          cargo test -p cleanmame-core --test integration
+          cargo test -p cleanmame-cli --test cli
+          cargo test -p cleanmame-mcp --test http_integration
       - run: cargo build --workspace

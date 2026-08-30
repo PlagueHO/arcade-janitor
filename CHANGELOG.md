@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added weekly Dependabot updates for GitHub Actions and Rust dependencies.
 - Added CI, release, Rust toolchain, Rust edition, and license badges to the project README.
 - Added the CleanMAME logo to the project README.
 - Added `rom stats --show-unmatched` to list uncatalogued ROM archives.
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Changed CI to run the core, CLI, and MCP integration test suites explicitly.
 - Documented CleanMAME's focus on simple, agent-friendly ROM folder cleanup.
 - Replaced the unpublished CLI with a consistent resource-first `rom`, `catalog`,
   `category`, and `source` command structure.
@@ -46,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed CI and release workflows to use Node.js 24-compatible actions and avoid
+  warnings from an unused Homebrew tap on macOS runners.
 - Fixed source cache-clear previews to consistently report the requested clear action.
 - Fixed CLI workspace builds after adding category data to operation output.
 - Fixed `--include-mechanical` filtering so it can include non-runnable mechanical entries.
