@@ -5,7 +5,7 @@ use std::{
     process::Command,
 };
 
-use crate::{CleanMameError, Result, errors::io_error, parsers::catver::parse_catver_str};
+use crate::{ArcadeJanitorError, Result, errors::io_error, parsers::catver::parse_catver_str};
 
 pub const CATVER_DOWNLOAD_URL: &str =
     "https://raw.githubusercontent.com/AntoPISA/MAME_SupportFiles/main/catver.ini/catver.ini";
@@ -74,8 +74,8 @@ pub fn resolve_mame_xml(
     }
 
     let cache_path = dirs_next::cache_dir()
-        .ok_or(CleanMameError::CacheDirectoryUnavailable)?
-        .join("cleanmame")
+        .ok_or(ArcadeJanitorError::CacheDirectoryUnavailable)?
+        .join("arcadejanitor")
         .join("mame.xml");
     if let Some(executable) = executable {
         extract_mame_xml(executable, &cache_path)?;
@@ -105,7 +105,7 @@ fn resolve_mame_xml_path_in_cache(cached_path: &Path) -> Result<PathBuf> {
         return Ok(cached_path.to_path_buf());
     }
 
-    Err(CleanMameError::MameXmlUnavailable)
+    Err(ArcadeJanitorError::MameXmlUnavailable)
 }
 
 fn extract_mame_xml(executable: &Path, cached_path: &Path) -> Result<()> {
@@ -114,14 +114,14 @@ fn extract_mame_xml(executable: &Path, cached_path: &Path) -> Result<()> {
         .output()
         .map_err(|source| io_error(executable, source))?;
     if !output.status.success() {
-        return Err(CleanMameError::MameExecution {
+        return Err(ArcadeJanitorError::MameExecution {
             executable: executable.to_path_buf(),
             status: output.status.to_string(),
         });
     }
-    let xml = String::from_utf8(output.stdout).map_err(CleanMameError::MameEncoding)?;
+    let xml = String::from_utf8(output.stdout).map_err(ArcadeJanitorError::MameEncoding)?;
     if crate::parsers::mame_xml::parse_mame_xml_str(&xml)?.is_empty() {
-        return Err(CleanMameError::Xml(
+        return Err(ArcadeJanitorError::Xml(
             "MAME -listxml output did not contain any machine entries".to_string(),
         ));
     }
@@ -132,7 +132,7 @@ fn extract_mame_xml(executable: &Path, cached_path: &Path) -> Result<()> {
 fn cache_mame_xml(cached_path: &Path, content: &str) -> Result<()> {
     let parent = cached_path
         .parent()
-        .ok_or(CleanMameError::CacheDirectoryUnavailable)?;
+        .ok_or(ArcadeJanitorError::CacheDirectoryUnavailable)?;
     fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
     let temporary_path = cached_path.with_extension(format!("tmp-{}", std::process::id()));
     fs::write(&temporary_path, content).map_err(|source| io_error(&temporary_path, source))?;
@@ -158,8 +158,8 @@ pub fn refresh_catver() -> Result<ResolvedCatver> {
 
 pub fn managed_cache_paths() -> Result<ManagedCachePaths> {
     let directory = dirs_next::cache_dir()
-        .ok_or(CleanMameError::CacheDirectoryUnavailable)?
-        .join("cleanmame");
+        .ok_or(ArcadeJanitorError::CacheDirectoryUnavailable)?
+        .join("arcadejanitor");
     Ok(ManagedCachePaths {
         mame_xml: directory.join("mame.xml"),
         catver: directory.join("catver.ini"),
@@ -225,24 +225,25 @@ fn download_catver(cached_path: &Path) -> Result<()> {
 fn download_catver_from(cached_path: &Path, url: &str) -> Result<()> {
     let response = reqwest::blocking::get(url)
         .and_then(reqwest::blocking::Response::error_for_status)
-        .map_err(|source| CleanMameError::CatverDownload {
+        .map_err(|source| ArcadeJanitorError::CatverDownload {
             url: url.to_string(),
             source,
         })?;
     let content = response
         .bytes()
-        .map_err(|source| CleanMameError::CatverDownload {
+        .map_err(|source| ArcadeJanitorError::CatverDownload {
             url: url.to_string(),
             source,
         })?;
-    let content = String::from_utf8(content.to_vec()).map_err(CleanMameError::CatverEncoding)?;
+    let content =
+        String::from_utf8(content.to_vec()).map_err(ArcadeJanitorError::CatverEncoding)?;
     if parse_catver_str(&content)?.is_empty() {
-        return Err(CleanMameError::InvalidCatverDownload);
+        return Err(ArcadeJanitorError::InvalidCatverDownload);
     }
 
     let parent = cached_path
         .parent()
-        .ok_or(CleanMameError::CacheDirectoryUnavailable)?;
+        .ok_or(ArcadeJanitorError::CacheDirectoryUnavailable)?;
     fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
     let temporary_path = cached_path.with_extension(format!("tmp-{}", std::process::id()));
     fs::write(&temporary_path, content).map_err(|source| io_error(&temporary_path, source))?;
@@ -300,7 +301,7 @@ mod tests {
 
         assert!(matches!(
             resolve_mame_xml_path_in_cache(cached_path),
-            Err(CleanMameError::MameXmlUnavailable)
+            Err(ArcadeJanitorError::MameXmlUnavailable)
         ));
         assert_eq!(
             resolve_mame_xml(Some(explicit_path), None).unwrap().source,
@@ -311,7 +312,7 @@ mod tests {
     #[test]
     fn reuses_an_existing_cached_mame_xml() {
         let directory =
-            std::env::temp_dir().join(format!("cleanmame-mame-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("arcadejanitor-mame-test-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let cached_path = directory.join("mame.xml");
         fs::write(&cached_path, "<mame/>").unwrap();
@@ -327,7 +328,7 @@ mod tests {
     #[test]
     fn reuses_an_existing_cached_catver() {
         let directory =
-            std::env::temp_dir().join(format!("cleanmame-catver-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("arcadejanitor-catver-test-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let cached_path = directory.join("catver.ini");
         fs::write(&cached_path, "[Category]\npacman=Maze / Chase\n").unwrap();
@@ -363,7 +364,7 @@ mod tests {
             .unwrap();
         });
         let directory = std::env::temp_dir().join(format!(
-            "cleanmame-catver-download-test-{}",
+            "arcadejanitor-catver-download-test-{}",
             std::process::id()
         ));
         let cached_path = directory.join("catver.ini");
@@ -381,7 +382,7 @@ mod tests {
     #[test]
     fn replaces_an_existing_cache_file() {
         let directory = std::env::temp_dir().join(format!(
-            "cleanmame-cache-replace-test-{}",
+            "arcadejanitor-cache-replace-test-{}",
             std::process::id()
         ));
         fs::create_dir_all(&directory).unwrap();

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added weekly Dependabot updates for GitHub Actions and Rust dependencies.
 - Added CI, release, Rust toolchain, Rust edition, and license badges to the project README.
-- Added the CleanMAME logo to the project README.
+- Added the ArcadeJanitor logo to the project README.
 - Added `rom stats --show-unmatched` to list uncatalogued ROM archives.
 - Added automated standalone Linux, macOS, and Windows release packages for version tags.
 - Added this Keep a Changelog 1.1.0-formatted changelog.
@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added committed 100-entry integration fixtures and end-to-end CLI and MCP HTTP tests.
 - Added VS Code tasks for running the CLI and MCP integration test suites together or separately.
 - Added automatic extraction and OS cache reuse for MAME XML metadata.
-- Added a modern, color-aware CLI help layout with a CleanMAME logo in interactive terminals.
+- Added a modern, color-aware CLI help layout with a ArcadeJanitor logo in interactive terminals.
 - Improved the Windows MCP build task to initialize the Visual C++ toolchain automatically.
 - Added selectable table, JSON, and TSV output formats to CLI commands.
 - Added category and subcategory catalog views with case-insensitive filtering.
@@ -32,8 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed ArcadeJanitor to ArcadeJanitor.
 - Changed CI to run the core, CLI, and MCP integration test suites explicitly.
-- Documented CleanMAME's focus on simple, agent-friendly ROM folder cleanup.
+- Documented ArcadeJanitor's focus on simple, agent-friendly ROM folder cleanup.
 - Replaced the unpublished CLI with a consistent resource-first `rom`, `catalog`,
   `category`, and `source` command structure.
 - Clarified `rom stats` category output with total, available, missing, and unmatched counts.
@@ -59,4 +60,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entries.
 - Fixed metadata refresh validation and deterministic category-entry output.
 
-[unreleased]: https://github.com/PlagueHO/clean-mame/compare/main...HEAD
+[unreleased]: https://github.com/PlagueHO/arcade-janitor/compare/main...HEAD

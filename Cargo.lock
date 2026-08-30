@@ -77,6 +77,59 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arcadejanitor-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arcadejanitor-core",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "arcadejanitor-core"
+version = "0.1.0"
+dependencies = [
+ "dirs-next",
+ "ini",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "thiserror 2.0.20",
+ "tracing-subscriber",
+ "walkdir",
+]
+
+[[package]]
+name = "arcadejanitor-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arcadejanitor-core",
+ "axum",
+ "mcp-core-rs",
+ "mcp-error-rs",
+ "mcp-server-rs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "arraydeque"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -329,59 +382,6 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
-
-[[package]]
-name = "cleanmame-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "clap_complete",
- "cleanmame-core",
- "predicates",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "cleanmame-core"
-version = "0.1.0"
-dependencies = [
- "dirs-next",
- "ini",
- "quick-xml",
- "reqwest",
- "serde",
- "thiserror 2.0.20",
- "tracing-subscriber",
- "walkdir",
-]
-
-[[package]]
-name = "cleanmame-mcp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "cleanmame-core",
- "mcp-core-rs",
- "mcp-error-rs",
- "mcp-server-rs",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "colorchoice"

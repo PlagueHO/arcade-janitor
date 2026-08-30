@@ -6,7 +6,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 fn command() -> Command {
-    Command::new(cargo_bin!("cleanmame"))
+    Command::new(cargo_bin!("arcadejanitor"))
 }
 
 fn fixture() -> TempDir {

@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::{CleanMameError, Result, errors::io_error, models::RomEntry};
+use crate::{ArcadeJanitorError, Result, errors::io_error, models::RomEntry};
 
 pub fn delete_roms(roms: &[RomEntry], dry_run: bool) -> Result<Vec<String>> {
     let mut deleted = Vec::new();
@@ -8,7 +8,7 @@ pub fn delete_roms(roms: &[RomEntry], dry_run: bool) -> Result<Vec<String>> {
         let path = rom
             .rom_path
             .as_ref()
-            .ok_or_else(|| CleanMameError::MissingPath(rom.name.clone()))?;
+            .ok_or_else(|| ArcadeJanitorError::MissingPath(rom.name.clone()))?;
         if !dry_run {
             fs::remove_file(path).map_err(|source| io_error(path, source))?;
         }

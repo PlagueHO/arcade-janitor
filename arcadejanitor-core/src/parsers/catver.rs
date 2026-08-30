@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use crate::{CleanMameError, Result, errors::io_error, models::Genre};
+use crate::{ArcadeJanitorError, Result, errors::io_error, models::Genre};
 
 pub fn parse_catver_file(path: impl AsRef<Path>) -> Result<HashMap<String, Genre>> {
     let path = path.as_ref();
@@ -9,7 +9,7 @@ pub fn parse_catver_file(path: impl AsRef<Path>) -> Result<HashMap<String, Genre
 }
 
 pub fn parse_catver_str(content: &str) -> Result<HashMap<String, Genre>> {
-    let parsed = ini::macro_safe_read(content).map_err(CleanMameError::Ini)?;
+    let parsed = ini::macro_safe_read(content).map_err(ArcadeJanitorError::Ini)?;
     let mut genres = HashMap::new();
 
     if let Some(category) = parsed

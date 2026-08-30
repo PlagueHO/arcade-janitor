@@ -10,12 +10,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Local};
-use clap::{
-    ColorChoice, CommandFactory, FromArgMatches,
-    builder::styling::{AnsiColor, Styles},
-};
-use cleanmame_core::{
+use arcadejanitor_core::{
     Region, RomEntry,
     metadata::{
         MetadataSourceTarget, clear_managed_cache, managed_cache_paths, plan_clear_managed_cache,
@@ -29,6 +24,11 @@ use cleanmame_core::{
     },
     utils::filesystem::list_rom_files,
 };
+use chrono::{DateTime, Local};
+use clap::{
+    ColorChoice, CommandFactory, FromArgMatches,
+    builder::styling::{AnsiColor, Styles},
+};
 use cli::{
     AuditLevel, CatalogCommands, CategoryCommands, Cli, ColorMode, Commands, OrderingArgs,
     OutputFormat, PresentationOptions, RegionArg, RomCommands, RomStatus, SelectorArgs, SortField,
@@ -37,10 +37,10 @@ use cli::{
 use serde::Serialize;
 
 const LOGO: &str = "
-\x1b[38;5;39m   ___ _               __  __   _   __  __ ___ \n\
-\x1b[38;5;45m  / __| |___ __ _ _ _ |  \\/  | /_\\ |  \\/  | __|\n\
-\x1b[38;5;51m | (__| / -_) _` | ' \\| |\\/| |/ _ \\| |\\/| | _| \n\
-\x1b[38;5;87m  \\___|_\\___\\__,_|_||_|_|  |_/_/ \\_\\_|  |_|___|\n\
+\x1b[38;5;39m    +--------------------------------+\n\
+\x1b[38;5;45m    |         ARCADE JANITOR         |\n\
+\x1b[38;5;51m    |     Arcade ROM collection      |\n\
+\x1b[38;5;87m    +--------------------------------+\n\
 \x1b[0m";
 
 #[tokio::main]
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
             clap_complete::generate(
                 args.shell,
                 &mut cli_command(),
-                "cleanmame",
+                "arcadejanitor",
                 &mut std::io::stdout(),
             );
         }

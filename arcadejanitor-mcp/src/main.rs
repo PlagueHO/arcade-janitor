@@ -2,6 +2,16 @@ use std::{
     collections::BTreeMap, future::Future, net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc,
 };
 
+use arcadejanitor_core::metadata::{
+    MameXmlSource, resolve_catver_path, resolve_mame_xml, resolve_mame_xml_path,
+};
+use arcadejanitor_core::operations::{
+    delete::delete_roms,
+    filter::{FilterOptions, filter_roms},
+    r#move::move_roms,
+    query::{find_by_name, load_metadata, scan_rom_folder},
+    report::generate_report,
+};
 use axum::{
     Json, Router,
     extract::{
@@ -11,16 +21,6 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
-};
-use cleanmame_core::metadata::{
-    MameXmlSource, resolve_catver_path, resolve_mame_xml, resolve_mame_xml_path,
-};
-use cleanmame_core::operations::{
-    delete::delete_roms,
-    filter::{FilterOptions, filter_roms},
-    r#move::move_roms,
-    query::{find_by_name, load_metadata, scan_rom_folder},
-    report::generate_report,
 };
 use mcp_core_rs::{
     Resource, Tool,
@@ -39,7 +39,7 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
-const SERVER_NAME: &str = "cleanmame";
+const SERVER_NAME: &str = "arcadejanitor";
 
 #[derive(Clone)]
 struct AppState {
@@ -47,24 +47,24 @@ struct AppState {
 }
 
 #[derive(Clone)]
-struct CleanMameRouter {
+struct ArcadeJanitorRouter {
     destructive_tools_allowed: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    cleanmame_core::utils::logging::init_logging();
-    let addr: SocketAddr = std::env::var("CLEANMAME_MCP_ADDR")
+    arcadejanitor_core::utils::logging::init_logging();
+    let addr: SocketAddr = std::env::var("ARCADEJANITOR_MCP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:3000".to_string())
         .parse()?;
     let state = AppState {
-        auth_token: std::env::var("CLEANMAME_MCP_TOKEN")
+        auth_token: std::env::var("ARCADEJANITOR_MCP_TOKEN")
             .ok()
             .filter(|token| !token.is_empty())
             .map(Arc::<str>::from),
     };
     if state.auth_token.is_none() {
-        warn!("destructive MCP tools are disabled; set CLEANMAME_MCP_TOKEN to enable them");
+        warn!("destructive MCP tools are disabled; set ARCADEJANITOR_MCP_TOKEN to enable them");
     }
 
     let app = Router::new()
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     let listener = TcpListener::bind(addr).await?;
-    info!(%addr, "CleanMAME MCP server listening");
+    info!(%addr, "ArcadeJanitor MCP server listening");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -100,7 +100,7 @@ async fn websocket_handler(
         .into_response()
 }
 
-async fn handle_socket(mut socket: WebSocket, router: CleanMameRouter) {
+async fn handle_socket(mut socket: WebSocket, router: ArcadeJanitorRouter) {
     while let Some(Ok(message)) = socket.recv().await {
         let Message::Text(text) = message else {
             continue;
@@ -137,8 +137,8 @@ async fn mcp_handler(
     }
 }
 
-fn router_for_request(state: &AppState, headers: &HeaderMap) -> CleanMameRouter {
-    CleanMameRouter {
+fn router_for_request(state: &AppState, headers: &HeaderMap) -> ArcadeJanitorRouter {
+    ArcadeJanitorRouter {
         destructive_tools_allowed: is_authorized(state, headers),
     }
 }
@@ -177,7 +177,7 @@ fn has_trusted_origin(headers: &HeaderMap) -> bool {
 }
 
 async fn handle_request(
-    router: CleanMameRouter,
+    router: ArcadeJanitorRouter,
     request: JsonRpcRequest,
 ) -> Option<JsonRpcResponse> {
     let id = request.id?;
@@ -221,7 +221,7 @@ struct WireResponse {
 }
 
 async fn handle_wire_request(
-    router: CleanMameRouter,
+    router: ArcadeJanitorRouter,
     request: WireRequest,
 ) -> Option<WireResponse> {
     let id = request.id.clone()?;
@@ -275,7 +275,7 @@ fn rpc_error(id: Option<u64>, code: i32, message: impl Into<String>) -> JsonRpcR
     )
 }
 
-impl McpRouter for CleanMameRouter {
+impl McpRouter for ArcadeJanitorRouter {
     fn name(&self) -> String {
         SERVER_NAME.to_string()
     }
@@ -458,7 +458,7 @@ fn describe_mame_xml_source(source: &MameXmlSource) -> String {
         MameXmlSource::ExtractedFrom(executable) => {
             format!("extracted from {}", executable.display())
         }
-        MameXmlSource::Cache => "CleanMAME cache".to_string(),
+        MameXmlSource::Cache => "ArcadeJanitor cache".to_string(),
     }
 }
 
@@ -513,7 +513,7 @@ fn generate_report_tool(args: Value) -> Value {
 fn list_catver_tool(args: Value) -> Value {
     match parse_catver_args(args).and_then(|args| {
         let catver = resolve_catver_path(args.catver.as_deref())?;
-        let mut entries = cleanmame_core::parsers::catver::parse_catver_file(catver)?
+        let mut entries = arcadejanitor_core::parsers::catver::parse_catver_file(catver)?
             .into_iter()
             .map(|(name, genre)| CatverEntry {
                 name,
@@ -941,7 +941,7 @@ mod tests {
     #[tokio::test]
     async fn lists_required_tools_with_schemas_and_preserves_request_id() {
         let response = handle_request(
-            CleanMameRouter {
+            ArcadeJanitorRouter {
                 destructive_tools_allowed: true,
             },
             JsonRpcRequest::new(Some(42), "tools/list", None),
@@ -986,7 +986,7 @@ mod tests {
 
     #[test]
     fn destructive_tools_only_select_available_roms() {
-        let folder = std::env::temp_dir().join(format!("cleanmame-mcp-{}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!("arcadejanitor-mcp-{}", std::process::id()));
         let rom_folder = folder.join("roms");
         let target_folder = folder.join("target");
         let mame_xml = folder.join("mame.xml");
@@ -1037,7 +1037,7 @@ mod tests {
     #[test]
     fn lists_filtered_catver_subcategories() {
         let folder =
-            std::env::temp_dir().join(format!("cleanmame-mcp-catver-{}", std::process::id()));
+            std::env::temp_dir().join(format!("arcadejanitor-mcp-catver-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let catver = folder.join("catver.ini");
         std::fs::write(
@@ -1074,7 +1074,7 @@ mod tests {
     #[test]
     fn shows_and_filters_mame_metadata_without_a_rom_folder() {
         let folder =
-            std::env::temp_dir().join(format!("cleanmame-mcp-mame-{}", std::process::id()));
+            std::env::temp_dir().join(format!("arcadejanitor-mcp-mame-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let mame_xml = folder.join("mame.xml");
         let catver = folder.join("catver.ini");

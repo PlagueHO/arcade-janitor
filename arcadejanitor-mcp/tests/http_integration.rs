@@ -16,8 +16,8 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn start_server(port: u16) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_cleanmame-mcp"))
-        .env("CLEANMAME_MCP_ADDR", format!("127.0.0.1:{port}"))
+    Command::new(env!("CARGO_BIN_EXE_arcadejanitor-mcp"))
+        .env("ARCADEJANITOR_MCP_ADDR", format!("127.0.0.1:{port}"))
         .spawn()
         .unwrap()
 }

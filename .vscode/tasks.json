@@ -14,10 +14,10 @@
       }
     },
     {
-      "label": "Build: cleanmame-core",
+      "label": "Build: arcadejanitor-core",
       "type": "shell",
       "command": "cargo",
-      "args": ["build", "-p", "cleanmame-core"],
+      "args": ["build", "-p", "arcadejanitor-core"],
       "group": "build",
       "problemMatcher": "$rustc",
       "icon": {
@@ -26,10 +26,10 @@
       }
     },
     {
-      "label": "Build: cleanmame-cli",
+      "label": "Build: arcadejanitor-cli",
       "type": "shell",
       "command": "cargo",
-      "args": ["build", "-p", "cleanmame-cli"],
+      "args": ["build", "-p", "arcadejanitor-cli"],
       "group": "build",
       "problemMatcher": "$rustc",
       "icon": {
@@ -38,10 +38,10 @@
       }
     },
     {
-      "label": "Build: cleanmame-mcp",
+      "label": "Build: arcadejanitor-mcp",
       "type": "shell",
       "command": "powershell",
-      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1", "build", "-p", "cleanmame-mcp"],
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1", "build", "-p", "arcadejanitor-mcp"],
       "group": "build",
       "problemMatcher": "$rustc",
       "icon": {
@@ -61,10 +61,10 @@
       }
     },
     {
-      "label": "Package: cleanmame-core",
+      "label": "Package: arcadejanitor-core",
       "type": "shell",
       "command": "cargo",
-      "args": ["package", "-p", "cleanmame-core"],
+      "args": ["package", "-p", "arcadejanitor-core"],
       "problemMatcher": "$rustc",
       "icon": {
         "id": "package",
@@ -72,10 +72,10 @@
       }
     },
     {
-      "label": "Package: cleanmame-cli",
+      "label": "Package: arcadejanitor-cli",
       "type": "shell",
       "command": "cargo",
-      "args": ["package", "-p", "cleanmame-cli"],
+      "args": ["package", "-p", "arcadejanitor-cli"],
       "problemMatcher": "$rustc",
       "icon": {
         "id": "package",
@@ -83,10 +83,10 @@
       }
     },
     {
-      "label": "Package: cleanmame-mcp",
+      "label": "Package: arcadejanitor-mcp",
       "type": "shell",
       "command": "cargo",
-      "args": ["package", "-p", "cleanmame-mcp"],
+      "args": ["package", "-p", "arcadejanitor-mcp"],
       "problemMatcher": "$rustc",
       "icon": {
         "id": "package",
@@ -94,10 +94,10 @@
       }
     },
     {
-      "label": "Run: cleanmame-cli",
+      "label": "Run: arcadejanitor-cli",
       "type": "shell",
       "command": "cargo",
-      "args": ["run", "-p", "cleanmame-cli", "--", "--help"],
+      "args": ["run", "-p", "arcadejanitor-cli", "--", "--help"],
       "problemMatcher": "$rustc",
       "icon": {
         "id": "play",
@@ -105,20 +105,20 @@
       }
     },
     {
-      "label": "Run: cleanmame-mcp",
+      "label": "Run: arcadejanitor-mcp",
       "type": "shell",
       "command": "cargo",
-      "args": ["run", "-p", "cleanmame-mcp"],
+      "args": ["run", "-p", "arcadejanitor-mcp"],
       "isBackground": true,
       "problemMatcher": {
-        "owner": "cleanmame-mcp",
+        "owner": "arcadejanitor-mcp",
         "pattern": {
           "regexp": ".*"
         },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": ".*CleanMAME MCP server listening.*",
-          "endsPattern": ".*CleanMAME MCP server listening.*"
+          "beginsPattern": ".*ArcadeJanitor MCP server listening.*",
+          "endsPattern": ".*ArcadeJanitor MCP server listening.*"
         }
       },
       "presentation": {
@@ -144,10 +144,10 @@
       }
     },
     {
-      "label": "Test: cleanmame-core",
+      "label": "Test: arcadejanitor-core",
       "type": "shell",
       "command": "cargo",
-      "args": ["test", "-p", "cleanmame-core"],
+      "args": ["test", "-p", "arcadejanitor-core"],
       "group": "test",
       "problemMatcher": "$rustc",
       "icon": {
@@ -156,10 +156,10 @@
       }
     },
     {
-      "label": "Test: cleanmame-cli",
+      "label": "Test: arcadejanitor-cli",
       "type": "shell",
       "command": "cargo",
-      "args": ["test", "-p", "cleanmame-cli"],
+      "args": ["test", "-p", "arcadejanitor-cli"],
       "group": "test",
       "problemMatcher": "$rustc",
       "icon": {
@@ -168,10 +168,10 @@
       }
     },
     {
-      "label": "Test: cleanmame-mcp",
+      "label": "Test: arcadejanitor-mcp",
       "type": "shell",
       "command": "cargo",
-      "args": ["test", "-p", "cleanmame-mcp"],
+      "args": ["test", "-p", "arcadejanitor-mcp"],
       "group": "test",
       "problemMatcher": "$rustc",
       "icon": {
@@ -196,7 +196,7 @@
       "label": "Test: Integration (CLI)",
       "type": "shell",
       "command": "cargo",
-      "args": ["test", "-p", "cleanmame-cli", "--test", "cli"],
+      "args": ["test", "-p", "arcadejanitor-cli", "--test", "cli"],
       "group": "test",
       "problemMatcher": "$rustc",
       "icon": {
@@ -216,7 +216,7 @@
         "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1",
         "test",
         "-p",
-        "cleanmame-mcp",
+        "arcadejanitor-mcp",
         "--test",
         "http_integration"
       ],

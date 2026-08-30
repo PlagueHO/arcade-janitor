@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem with CleanMAME.
+description: Report a reproducible problem with ArcadeJanitor.
 title: "[Bug]: "
 labels:
   - bug
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve CleanMAME. Please search existing issues before submitting.
+        Thanks for helping improve ArcadeJanitor. Please search existing issues before submitting.
   - type: textarea
     id: problem
     attributes:
@@ -32,7 +32,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: CleanMAME version or commit
+      label: ArcadeJanitor version or commit
       placeholder: "e.g. 0.1.0 or abc1234"
   - type: input
     id: environment

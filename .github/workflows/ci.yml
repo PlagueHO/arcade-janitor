@@ -43,7 +43,7 @@ jobs:
       - run: cargo test --workspace
       - name: Run integration tests
         run: |
-          cargo test -p cleanmame-core --test integration
-          cargo test -p cleanmame-cli --test cli
-          cargo test -p cleanmame-mcp --test http_integration
+          cargo test -p arcadejanitor-core --test integration
+          cargo test -p arcadejanitor-cli --test cli
+          cargo test -p arcadejanitor-mcp --test http_integration
       - run: cargo build --workspace

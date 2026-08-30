@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use crate::{CleanMameError, Result, errors::io_error, models::RomEntry};
+use crate::{ArcadeJanitorError, Result, errors::io_error, models::RomEntry};
 
 pub fn move_roms(
     roms: &[RomEntry],
@@ -21,10 +21,10 @@ pub fn move_roms(
         let source = rom
             .rom_path
             .as_ref()
-            .ok_or_else(|| CleanMameError::MissingPath(rom.name.clone()))?;
+            .ok_or_else(|| ArcadeJanitorError::MissingPath(rom.name.clone()))?;
         let file_name = source
             .file_name()
-            .ok_or_else(|| CleanMameError::MissingPath(rom.name.clone()))?;
+            .ok_or_else(|| ArcadeJanitorError::MissingPath(rom.name.clone()))?;
         let target = target_folder.join(file_name);
         if dry_run {
             ensure_target_available(&target)?;
@@ -85,7 +85,8 @@ mod tests {
 
     #[test]
     fn does_not_replace_existing_target() {
-        let folder = std::env::temp_dir().join(format!("cleanmame-move-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("arcadejanitor-move-{}", std::process::id()));
         let source = folder.join("source.zip");
         let target = folder.join("target.zip");
         fs::create_dir_all(&folder).unwrap();
@@ -96,7 +97,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CleanMameError::Io {
+            ArcadeJanitorError::Io {
                 source,
                 ..
             } if source.kind() == io::ErrorKind::AlreadyExists

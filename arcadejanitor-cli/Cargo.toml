@@ -1,12 +1,12 @@
 [package]
-name = "cleanmame-cli"
+name = "arcadejanitor-cli"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "cleanmame"
+name = "arcadejanitor"
 path = "src/main.rs"
 
 [dependencies]
@@ -14,7 +14,7 @@ anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
-cleanmame-core = { path = "../cleanmame-core" }
+arcadejanitor-core = { path = "../arcadejanitor-core" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

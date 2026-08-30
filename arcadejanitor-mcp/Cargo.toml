@@ -1,5 +1,5 @@
 [package]
-name = "cleanmame-mcp"
+name = "arcadejanitor-mcp"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
-cleanmame-core = { path = "../cleanmame-core" }
+arcadejanitor-core = { path = "../arcadejanitor-core" }
 mcp-core-rs.workspace = true
 mcp-error-rs.workspace = true
 mcp-server-rs.workspace = true

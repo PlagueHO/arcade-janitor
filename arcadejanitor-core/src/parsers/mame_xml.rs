@@ -5,7 +5,7 @@ use quick_xml::{
     events::{BytesStart, Event},
 };
 
-use crate::{CleanMameError, Result, errors::io_error, models::RomEntry};
+use crate::{ArcadeJanitorError, Result, errors::io_error, models::RomEntry};
 
 pub fn parse_mame_xml_file(path: impl AsRef<Path>) -> Result<Vec<RomEntry>> {
     let path = path.as_ref();
@@ -41,7 +41,7 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
             Ok(Event::Text(text)) => {
                 if let (Some(entry), Some(field)) = (current.as_mut(), current_field) {
                     let value = quick_xml::escape::unescape(text.as_ref())
-                        .map_err(|error| CleanMameError::Xml(error.to_string()))?
+                        .map_err(|error| ArcadeJanitorError::Xml(error.to_string()))?
                         .into_owned();
                     append_field(entry, field, &value);
                 }
@@ -50,13 +50,13 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                 if let (Some(entry), Some(field)) = (current.as_mut(), current_field) {
                     let value = if let Some(character) = reference
                         .resolve_char_ref()
-                        .map_err(|error| CleanMameError::Xml(error.to_string()))?
+                        .map_err(|error| ArcadeJanitorError::Xml(error.to_string()))?
                     {
                         character.to_string()
                     } else {
                         quick_xml::escape::resolve_predefined_entity(reference.as_ref())
                             .ok_or_else(|| {
-                                CleanMameError::Xml(format!(
+                                ArcadeJanitorError::Xml(format!(
                                     "unrecognized entity '{}'",
                                     reference.as_ref()
                                 ))
@@ -80,7 +80,7 @@ pub fn parse_mame_xml_str(content: &str) -> Result<Vec<RomEntry>> {
                 current_field = None;
             }
             Ok(Event::Eof) => break,
-            Err(error) => return Err(CleanMameError::Xml(error.to_string())),
+            Err(error) => return Err(ArcadeJanitorError::Xml(error.to_string())),
             _ => {}
         }
     }
@@ -104,10 +104,10 @@ fn parse_machine(element: &BytesStart<'_>) -> Result<Option<RomEntry>> {
     let mut mechanical = false;
 
     for attr in element.attributes() {
-        let attr = attr.map_err(|error| CleanMameError::Xml(error.to_string()))?;
+        let attr = attr.map_err(|error| ArcadeJanitorError::Xml(error.to_string()))?;
         let value = attr
             .normalized_value(Default::default())
-            .map_err(|error| CleanMameError::Xml(error.to_string()))?
+            .map_err(|error| ArcadeJanitorError::Xml(error.to_string()))?
             .into_owned();
         match attr.key.as_ref() {
             "name" => name = Some(value),

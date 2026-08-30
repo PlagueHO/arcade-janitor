@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, CleanMameError>;
+pub type Result<T> = std::result::Result<T, ArcadeJanitorError>;
 
 #[derive(Debug, Error)]
-pub enum CleanMameError {
+pub enum ArcadeJanitorError {
     #[error("I/O error at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -40,8 +40,8 @@ pub enum CleanMameError {
     MissingPath(String),
 }
 
-pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> CleanMameError {
-    CleanMameError::Io {
+pub(crate) fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> ArcadeJanitorError {
+    ArcadeJanitorError::Io {
         path: path.into(),
         source,
     }

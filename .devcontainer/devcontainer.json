@@ -1,5 +1,5 @@
 {
-  "name": "CleanMAME Rust",
+  "name": "ArcadeJanitor Rust",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
@@ -22,7 +22,7 @@
   "forwardPorts": [3000],
   "portsAttributes": {
     "3000": {
-      "label": "CleanMAME MCP API",
+      "label": "ArcadeJanitor MCP API",
       "onAutoForward": "notify"
     }
   },

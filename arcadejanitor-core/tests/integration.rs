@@ -4,7 +4,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use cleanmame_core::operations::{
+use arcadejanitor_core::operations::{
     filter::{FilterOptions, filter_roms},
     query::scan_rom_folder,
     report::generate_report,
@@ -62,7 +62,7 @@ fn unique_temp_dir() -> TestDir {
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
     let mut path = std::env::temp_dir();
     path.push(format!(
-        "cleanmame-test-{}-{}-{}",
+        "arcadejanitor-test-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -5,7 +5,7 @@ use clap_complete::Shell;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "cleanmame",
+    name = "arcadejanitor",
     version,
     about = "Inspect and manage MAME ROM collections",
     subcommand_required = true,
@@ -27,21 +27,21 @@ pub struct SourceOptions {
         global = true,
         value_name = "PATH",
         conflicts_with = "mame_executable",
-        help = "Read MAME metadata from this XML file [env: CLEANMAME_MAME_XML]"
+        help = "Read MAME metadata from this XML file [env: ARCADEJANITOR_MAME_XML]"
     )]
     pub mame_xml: Option<PathBuf>,
     #[arg(
         long,
         global = true,
         value_name = "PATH",
-        help = "Extract MAME metadata using this executable [env: CLEANMAME_MAME_EXECUTABLE]"
+        help = "Extract MAME metadata using this executable [env: ARCADEJANITOR_MAME_EXECUTABLE]"
     )]
     pub mame_executable: Option<PathBuf>,
     #[arg(
         long,
         global = true,
         value_name = "PATH",
-        help = "Read category metadata from this catver.ini file [env: CLEANMAME_CATVER]"
+        help = "Read category metadata from this catver.ini file [env: ARCADEJANITOR_CATVER]"
     )]
     pub catver: Option<PathBuf>,
 }
@@ -49,13 +49,14 @@ pub struct SourceOptions {
 impl SourceOptions {
     pub fn apply_environment(mut self) -> Self {
         if self.mame_xml.is_none() {
-            self.mame_xml = non_empty_env("CLEANMAME_MAME_XML").map(PathBuf::from);
+            self.mame_xml = non_empty_env("ARCADEJANITOR_MAME_XML").map(PathBuf::from);
         }
         if self.mame_executable.is_none() {
-            self.mame_executable = non_empty_env("CLEANMAME_MAME_EXECUTABLE").map(PathBuf::from);
+            self.mame_executable =
+                non_empty_env("ARCADEJANITOR_MAME_EXECUTABLE").map(PathBuf::from);
         }
         if self.catver.is_none() {
-            self.catver = non_empty_env("CLEANMAME_CATVER").map(PathBuf::from);
+            self.catver = non_empty_env("ARCADEJANITOR_CATVER").map(PathBuf::from);
         }
         self
     }

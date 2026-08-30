@@ -51,7 +51,7 @@ jobs:
             echo "Tag must match vX.Y.Z, got: $GITHUB_REF_NAME" >&2
             exit 1
           fi
-      - run: cargo build -p cleanmame-cli -p cleanmame-mcp --release
+      - run: cargo build -p arcadejanitor-cli -p arcadejanitor-mcp --release
       - name: Package Unix binaries
         if: runner.os != 'Windows'
         shell: bash
@@ -59,24 +59,24 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          archive="cleanmame-${GITHUB_REF_NAME}-${PLATFORM}.tar.gz"
+          archive="arcadejanitor-${GITHUB_REF_NAME}-${PLATFORM}.tar.gz"
           mkdir -p package
-          cp target/release/cleanmame target/release/cleanmame-mcp package/
-          tar -czf "$archive" -C package cleanmame cleanmame-mcp
+          cp target/release/arcadejanitor target/release/arcadejanitor-mcp package/
+          tar -czf "$archive" -C package arcadejanitor arcadejanitor-mcp
       - name: Package Windows binaries
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
-          $archive = "cleanmame-$env:GITHUB_REF_NAME-$env:PLATFORM.zip"
+          $archive = "arcadejanitor-$env:GITHUB_REF_NAME-$env:PLATFORM.zip"
           New-Item -ItemType Directory -Path package -Force | Out-Null
-          Copy-Item target/release/cleanmame.exe, target/release/cleanmame-mcp.exe -Destination package
+          Copy-Item target/release/arcadejanitor.exe, target/release/arcadejanitor-mcp.exe -Destination package
           Compress-Archive -Path package/* -DestinationPath $archive
       - uses: actions/upload-artifact@v4
         with:
-          name: cleanmame-${{ matrix.platform }}
-          path: cleanmame-${{ github.ref_name }}-${{ matrix.platform }}.*
+          name: arcadejanitor-${{ matrix.platform }}
+          path: arcadejanitor-${{ github.ref_name }}-${{ matrix.platform }}.*
           if-no-files-found: error
 
   publish:
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: cleanmame-*
+          pattern: arcadejanitor-*
           merge-multiple: true
       - name: Extract changelog entry
         env:
@@ -118,5 +118,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ github.ref_name }}" dist/* \
-          --title "CleanMAME ${{ github.ref_name }}" \
+          --title "ArcadeJanitor ${{ github.ref_name }}" \
           --notes-file release-notes.md
