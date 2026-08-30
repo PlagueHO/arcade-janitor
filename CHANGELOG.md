@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-30
+
 ### Added
 
 - Added weekly Dependabot updates for GitHub Actions and Rust dependencies.
@@ -63,4 +65,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entries.
 - Fixed metadata refresh validation and deterministic category-entry output.
 
-[unreleased]: https://github.com/PlagueHO/arcade-janitor/compare/main...HEAD
+[unreleased]: https://github.com/PlagueHO/arcade-janitor/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/PlagueHO/arcade-janitor/releases/tag/v0.1.0
