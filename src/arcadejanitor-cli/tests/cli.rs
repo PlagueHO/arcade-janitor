@@ -44,11 +44,11 @@ fn large_fixture() -> (&'static Path, &'static Path) {
     (
         Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../tests/fixtures/mame-100.xml"
+            "/../../tests/fixtures/mame-100.xml"
         )),
         Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../tests/fixtures/catver-100.ini"
+            "/../../tests/fixtures/catver-100.ini"
         )),
     )
 }

@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "arcadejanitor-core",
-    "arcadejanitor-cli",
-    "arcadejanitor-mcp",
+    "src/arcadejanitor-core",
+    "src/arcadejanitor-cli",
+    "src/arcadejanitor-mcp",
 ]
 resolver = "2"
 

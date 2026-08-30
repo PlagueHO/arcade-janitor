@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../tests/fixtures")
+        .join("../../tests/fixtures")
         .join(name)
 }
 

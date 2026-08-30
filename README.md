@@ -19,9 +19,9 @@ folder cleanup, whether used directly from the command line or through an AI age
 
 ## Workspace
 
-- `arcadejanitor-core` - shared models, parsers, operations, and utilities
-- `arcadejanitor-cli` - command-line interface
-- `arcadejanitor-mcp` - Axum HTTP/WebSocket MCP server
+- `src/arcadejanitor-core` - shared models, parsers, operations, and utilities
+- `src/arcadejanitor-cli` - command-line interface
+- `src/arcadejanitor-mcp` - Axum HTTP/WebSocket MCP server
 
 ## v1 scope
 
