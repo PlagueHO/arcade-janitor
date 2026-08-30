@@ -36,12 +36,21 @@ use cli::{
 };
 use serde::Serialize;
 
-const LOGO: &str = "
-\x1b[38;5;39m    +--------------------------------+\n\
-\x1b[38;5;45m    |         ARCADE JANITOR         |\n\
-\x1b[38;5;51m    |     Arcade ROM collection      |\n\
-\x1b[38;5;87m    +--------------------------------+\n\
-\x1b[0m";
+const LOGO: &str = concat!(
+    "\n\x1b[38;5;39m",
+    r"   _____                            .___            ____.             .__  __",
+    "\n\x1b[38;5;39m",
+    r"  /  _  \_______   ____ _____     __| _/____       |    |____    ____ |__|/  |_  ___________",
+    "\n\x1b[38;5;45m",
+    r" /  /_\  \_  __ \_/ ___\\__  \   / __ |/ __ \      |    \__  \  /    \|  \   __\/  _ \_  __ \",
+    "\n\x1b[38;5;51m",
+    r"/    |    \  | \/\  \___ / __ \_/ /_/ \  ___/  /\__|    |/ __ \|   |  \  ||  | (  <_> )  | \/",
+    "\n\x1b[38;5;87m",
+    r"\____|__  /__|    \___  >____  /\____ |\___  > \________(____  /___|  /__||__|  \____/|__|",
+    "\n\x1b[38;5;87m",
+    r"        \/            \/     \/      \/    \/                \/     \/",
+    "\n\x1b[0m"
+);
 
 fn main() -> Result<()> {
     let cli = Cli::from_arg_matches(&cli_command().get_matches())?;
@@ -1221,6 +1230,18 @@ mod tests {
     #[test]
     fn command_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn logo_uses_the_four_color_ascii_art() {
+        for color in [39, 45, 51, 87] {
+            assert!(
+                LOGO.contains(&format!("\x1b[38;5;{color}m")),
+                "missing color {color}"
+            );
+        }
+        assert!(LOGO.contains(r"\________(____"));
+        assert!(LOGO.ends_with("\x1b[0m"));
     }
 
     #[test]

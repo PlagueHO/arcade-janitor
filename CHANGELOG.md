@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Changed the CLI startup banner to a four-color ASCII-art ArcadeJanitor logo.
 - Renamed ArcadeJanitor to ArcadeJanitor.
 - Changed CI to run the core, CLI, and MCP integration test suites explicitly.
 - Documented ArcadeJanitor's focus on simple, agent-friendly ROM folder cleanup.
