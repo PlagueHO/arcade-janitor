@@ -5,7 +5,8 @@
     "tamasfe.even-better-toml",
     "redhat.vscode-yaml",
     "ms-azuretools.vscode-docker",
-    "humao.rest-client"
+    "humao.rest-client",
+    "github.vscode-github-actions"
   ],
   "unwantedRecommendations": [
     "rust-lang.rust"
