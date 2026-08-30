@@ -353,7 +353,12 @@ pub struct SelectorArgs {
     pub name: Vec<String>,
     #[arg(long, value_name = "TEXT", help = "Match a genre; repeat for OR")]
     pub genre: Vec<String>,
-    #[arg(long, value_name = "TEXT", help = "Match a category; repeat for OR")]
+    #[arg(
+        long,
+        value_name = "TEXT",
+        value_delimiter = ',',
+        help = "Match categories; separate values with commas or repeat for OR"
+    )]
     pub category: Vec<String>,
     #[arg(long, value_name = "TEXT", help = "Match a subcategory; repeat for OR")]
     pub subcategory: Vec<String>,

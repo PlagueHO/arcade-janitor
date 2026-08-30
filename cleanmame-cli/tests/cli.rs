@@ -277,6 +277,29 @@ fn rom_stats_filters_categories_and_can_show_missing_roms() {
 }
 
 #[test]
+fn rom_stats_accepts_comma_separated_categories() {
+    let directory = fixture();
+    let mut arguments = vec![
+        "rom".to_string(),
+        "stats".to_string(),
+        directory.path().join("roms").display().to_string(),
+        "--category".to_string(),
+        "'Maze','Shooter'".to_string(),
+        "--output".to_string(),
+        "json".to_string(),
+    ];
+    arguments.extend(source_args(directory.path()));
+
+    command()
+        .args(arguments)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""total": 2"#))
+        .stdout(predicate::str::contains(r#""Maze""#))
+        .stdout(predicate::str::contains(r#""Shooter""#));
+}
+
+#[test]
 fn mutations_require_selection_and_preview_by_default() {
     let directory = fixture();
     let rom_dir = directory.path().join("roms");
@@ -305,6 +328,8 @@ fn mutations_require_selection_and_preview_by_default() {
         .args(preview)
         .assert()
         .success()
+        .stdout(predicate::str::contains(r#""category": "Maze""#))
+        .stdout(predicate::str::contains(r#""subcategory": "Chase""#))
         .stdout(predicate::str::contains(r#""state": "preview""#));
 
     assert!(rom_dir.join("pacman.zip").is_file());

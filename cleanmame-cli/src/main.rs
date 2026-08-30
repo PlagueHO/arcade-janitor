@@ -445,7 +445,17 @@ fn select_roms(
             region: None,
             names: selectors.name.clone(),
             genres: selectors.genre.clone(),
-            categories: selectors.category.clone(),
+            categories: selectors
+                .category
+                .iter()
+                .map(|category| {
+                    category
+                        .trim()
+                        .trim_matches(|character| character == '\'' || character == '"')
+                        .trim()
+                        .to_string()
+                })
+                .collect(),
             subcategories: selectors.subcategory.clone(),
             regions: selectors.region.iter().map(region_from_arg).collect(),
             manufacturers: selectors.manufacturer.clone(),
@@ -518,6 +528,13 @@ fn category_of(rom: &RomEntry) -> Option<&str> {
         .map(|genre| genre.category.as_str())
 }
 
+fn subcategory_of(rom: &RomEntry) -> Option<&str> {
+    rom.metadata
+        .genre
+        .as_ref()
+        .and_then(|genre| genre.subcategory.as_deref())
+}
+
 fn region_name(region: &Region) -> &str {
     match region {
         Region::Usa => "usa",
@@ -569,6 +586,8 @@ fn require_matches(roms: &[RomEntry]) -> Result<()> {
 #[derive(Serialize)]
 struct OperationResult {
     name: String,
+    category: Option<String>,
+    subcategory: Option<String>,
     source: String,
     destination: Option<String>,
     action: String,
@@ -595,6 +614,8 @@ fn plan_move(roms: &[RomEntry], destination: &Path) -> Result<Vec<OperationResul
         }
         results.push(OperationResult {
             name: rom.name.clone(),
+            category: category_of(rom).map(ToOwned::to_owned),
+            subcategory: subcategory_of(rom).map(ToOwned::to_owned),
             source: source.display().to_string(),
             destination: Some(target.display().to_string()),
             action: "move".to_string(),
@@ -613,6 +634,8 @@ fn plan_delete(roms: &[RomEntry]) -> Result<Vec<OperationResult>> {
                 .with_context(|| format!("ROM '{}' has no source path", rom.name))?;
             Ok(OperationResult {
                 name: rom.name.clone(),
+                category: category_of(rom).map(ToOwned::to_owned),
+                subcategory: subcategory_of(rom).map(ToOwned::to_owned),
                 source: source.display().to_string(),
                 destination: None,
                 action: "delete".to_string(),
@@ -1073,11 +1096,21 @@ fn render_source_details(rows: &[SourceDetail], options: &PresentationOptions) -
 fn render_operation_rows(rows: &[OperationResult], options: &PresentationOptions) -> Result<()> {
     render(
         rows,
-        &["name", "source", "destination", "action", "state"],
+        &[
+            "name",
+            "category",
+            "subcategory",
+            "source",
+            "destination",
+            "action",
+            "state",
+        ],
         rows.iter()
             .map(|row| {
                 vec![
                     row.name.clone(),
+                    row.category.clone().unwrap_or_default(),
+                    row.subcategory.clone().unwrap_or_default(),
                     row.source.clone(),
                     row.destination.clone().unwrap_or_default(),
                     row.action.clone(),

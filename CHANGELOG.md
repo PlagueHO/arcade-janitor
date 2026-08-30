@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced the unpublished CLI with a consistent resource-first `rom`, `catalog`,
   `category`, and `source` command structure.
 - Clarified `rom stats` category output with total, available, missing, and unmatched counts.
+- Added comma-separated values for the repeatable `--category` selector, including
+  PowerShell array-style input.
+- Added category and subcategory columns to ROM move and delete output.
 - Changed ROM move, delete, and cache clearing to preview by default and require
   `--execute` before modifying files.
 - Changed metadata source and output controls into global options with environment-variable
