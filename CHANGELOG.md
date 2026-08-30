@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed CLI workspace builds after adding category data to operation output.
 - Fixed `--include-mechanical` filtering so it can include non-runnable mechanical entries.
 - Fixed move and delete output to report accurate source and destination paths and preview
   state.

@@ -340,6 +340,8 @@ fn run_source(
                         .and_then(|name| name.to_str())
                         .unwrap_or("cache")
                         .to_string(),
+                    category: None,
+                    subcategory: None,
                     source: entry.path.display().to_string(),
                     destination: None,
                     action: if entry.exists { "clear" } else { "skip" }.to_string(),
