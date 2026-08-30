@@ -2,6 +2,7 @@
 
 [![CI][ci-shield]][ci-url]
 [![Release][release-shield]][release-url]
+[![Latest Release][latest-release-shield]][latest-release-url]
 [![Rust][rust-shield]][rust-url]
 [![Rust Edition][edition-shield]][edition-url]
 [![License][license-shield]][license-url]
@@ -39,6 +40,32 @@ When `--mame-executable <path>` is supplied without `--mame-xml`, ArcadeJanitor 
 `mame.exe -listxml` and caches the result in the current user's OS cache directory.
 The cached XML is reused when no XML path or executable is provided.
 
+## Installation
+
+Download the package for your operating system from the
+[latest GitHub release](https://github.com/PlagueHO/arcade-janitor/releases/latest).
+Each package contains the `arcadejanitor` CLI and `arcadejanitor-mcp` server.
+
+On Linux or macOS, extract the downloaded archive:
+
+```bash
+# Use "macos" instead of "linux" when extracting the macOS package.
+tar -xzf arcadejanitor-<version>-linux.tar.gz
+chmod +x arcadejanitor arcadejanitor-mcp
+./arcadejanitor --help
+```
+
+On Windows, extract the downloaded archive with PowerShell:
+
+```powershell
+Expand-Archive .\arcadejanitor-<version>-windows.zip -DestinationPath .\arcadejanitor
+Set-Location .\arcadejanitor
+.\arcadejanitor.exe --help
+```
+
+Move the extracted binaries to a directory on `PATH` to run them from any
+location, or use the relative paths shown in the examples below.
+
 ## CLI
 
 ArcadeJanitor uses a resource-first command structure:
@@ -58,20 +85,20 @@ Use `arcadejanitor <resource> --help` and
 ### Examples
 
 ```bash
-cargo run -p arcadejanitor-cli -- rom list ./roms --genre maze --mame-xml ./mame.xml --catver ./catver.ini
-cargo run -p arcadejanitor-cli -- rom show ./roms pacman --mame-xml ./mame.xml --catver ./catver.ini
-cargo run -p arcadejanitor-cli -- catalog show pacman --mame-xml ./mame.xml --catver ./catver.ini --output json
-cargo run -p arcadejanitor-cli -- catalog list --manufacturer Namco --year 1980..1985 --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- category show Shooter --subcategory vertical --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- rom move ./roms ./filtered --genre maze --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- rom move ./roms ./filtered --genre maze --execute --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- rom delete ./roms --name "prototype*" --execute --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- rom stats ./roms --output json --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- rom stats ./roms --category Shooter --subcategory "Flying Vertical" --show-missing --output json --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- rom stats ./roms --show-missing --show-unmatched --output json --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- rom audit ./roms --mame-xml ./mame.xml
-cargo run -p arcadejanitor-cli -- source list --output table
-cargo run -p arcadejanitor-cli -- completions powershell
+./arcadejanitor rom list ./roms --genre maze --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor rom show ./roms pacman --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor catalog show pacman --mame-xml ./mame.xml --catver ./catver.ini --output json
+./arcadejanitor catalog list --manufacturer Namco --year 1980..1985 --mame-xml ./mame.xml
+./arcadejanitor category show Shooter --subcategory vertical --mame-xml ./mame.xml
+./arcadejanitor rom move ./roms ./filtered --genre maze --mame-xml ./mame.xml
+./arcadejanitor rom move ./roms ./filtered --genre maze --execute --mame-xml ./mame.xml
+./arcadejanitor rom delete ./roms --name "prototype*" --execute --mame-xml ./mame.xml
+./arcadejanitor rom stats ./roms --output json --mame-xml ./mame.xml
+./arcadejanitor rom stats ./roms --category Shooter --subcategory "Flying Vertical" --show-missing --output json --mame-xml ./mame.xml
+./arcadejanitor rom stats ./roms --show-missing --show-unmatched --output json --mame-xml ./mame.xml
+./arcadejanitor rom audit ./roms --mame-xml ./mame.xml
+./arcadejanitor source list --output table
+./arcadejanitor completions powershell
 ```
 
 `rom move`, `rom delete`, and `source clear` only preview their operations unless
@@ -92,7 +119,7 @@ appear before or after a subcommand. Their environment variable equivalents are
 Start the MCP server:
 
 ```bash
-cargo run -p arcadejanitor-mcp
+./arcadejanitor-mcp
 ```
 
 The server listens on `http://127.0.0.1:3000` by default. Keep it running in a
@@ -102,10 +129,10 @@ the listen address. Set `ARCADEJANITOR_MCP_TOKEN` to enable the destructive tool
 
 ### Install in VS Code
 
-Build or run the MCP server from this repository:
+Start the extracted MCP server:
 
 ```bash
-cargo run -p arcadejanitor-mcp
+./arcadejanitor-mcp
 ```
 
 Create `.vscode/mcp.json` in your workspace (or use **MCP: Open User
@@ -137,7 +164,7 @@ configuration's `headers` object:
 Start the server in a separate terminal:
 
 ```bash
-cargo run -p arcadejanitor-mcp
+./arcadejanitor-mcp
 ```
 
 Register its Streamable HTTP endpoint with Copilot CLI:
@@ -238,6 +265,8 @@ cargo test --workspace
 [ci-url]: https://github.com/PlagueHO/arcade-janitor/actions/workflows/ci.yml
 [release-shield]: https://img.shields.io/github/actions/workflow/status/PlagueHO/arcade-janitor/release.yml?branch=main&label=Release
 [release-url]: https://github.com/PlagueHO/arcade-janitor/actions/workflows/release.yml
+[latest-release-shield]: https://img.shields.io/github/v/release/PlagueHO/arcade-janitor?label=Latest%20Release
+[latest-release-url]: https://github.com/PlagueHO/arcade-janitor/releases/latest
 [rust-shield]: https://img.shields.io/badge/Rust-stable-orange?logo=rust
 [rust-url]: https://www.rust-lang.org/tools/install
 [edition-shield]: https://img.shields.io/badge/Rust%20Edition-2024-orange?logo=rust
