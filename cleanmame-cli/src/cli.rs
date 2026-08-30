@@ -216,6 +216,11 @@ pub struct RomStatsArgs {
     pub selectors: SelectorArgs,
     #[arg(long, help = "Include the names of missing ROMs in the report")]
     pub show_missing: bool,
+    #[arg(
+        long,
+        help = "Include the names of unmatched ROM archives in the report"
+    )]
+    pub show_unmatched: bool,
 }
 
 #[derive(Args, Debug)]

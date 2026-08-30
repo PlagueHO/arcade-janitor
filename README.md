@@ -1,6 +1,21 @@
 # CleanMAME
 
+[![CI][ci-shield]][ci-url]
+[![Release][release-shield]][release-url]
+[![Rust][rust-shield]][rust-url]
+[![Rust Edition][edition-shield]][edition-url]
+[![License][license-shield]][license-url]
+
+![CleanMAME logo](docs/images/cleanmame.png)
+
 CleanMAME is a focused Rust CLI and MCP server for managing MAME ROM folders using only `mame.xml` and `catver.ini` metadata.
+
+## Why CleanMAME?
+
+CleanMAME began with a straightforward need: clean up a main MAME ROM directory.
+Existing tools offered powerful capabilities, but their complexity was more than was
+needed for that task. CleanMAME is designed to be simple and fast for focused ROM
+folder cleanup, whether used directly from the command line or through an AI agent.
 
 ## Workspace
 
@@ -53,6 +68,7 @@ cargo run -p cleanmame-cli -- rom move ./roms ./filtered --genre maze --execute 
 cargo run -p cleanmame-cli -- rom delete ./roms --name "prototype*" --execute --mame-xml ./mame.xml
 cargo run -p cleanmame-cli -- rom stats ./roms --output json --mame-xml ./mame.xml
 cargo run -p cleanmame-cli -- rom stats ./roms --category Shooter --subcategory "Flying Vertical" --show-missing --output json --mame-xml ./mame.xml
+cargo run -p cleanmame-cli -- rom stats ./roms --show-missing --show-unmatched --output json --mame-xml ./mame.xml
 cargo run -p cleanmame-cli -- rom audit ./roms --mame-xml ./mame.xml
 cargo run -p cleanmame-cli -- source list --output table
 cargo run -p cleanmame-cli -- completions powershell
@@ -65,6 +81,9 @@ cargo run -p cleanmame-cli -- completions powershell
 All list-like commands support table, JSON, and TSV output with `--output`. Use
 `--no-header` for headerless table or TSV output. Result data is written to stdout;
 progress and diagnostics are written to stderr.
+
+`rom stats` always includes aggregate missing and unmatched counts. Add
+`--show-missing` or `--show-unmatched` to include the corresponding ROM names.
 
 The source options `--mame-xml`, `--mame-executable`, and `--catver` are global and can
 appear before or after a subcommand. Their environment variable equivalents are
@@ -213,3 +232,15 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+<!-- Badge reference links -->
+[ci-shield]: https://img.shields.io/github/actions/workflow/status/PlagueHO/clean-mame/ci.yml?branch=main&label=CI
+[ci-url]: https://github.com/PlagueHO/clean-mame/actions/workflows/ci.yml
+[release-shield]: https://img.shields.io/github/actions/workflow/status/PlagueHO/clean-mame/release.yml?branch=main&label=Release
+[release-url]: https://github.com/PlagueHO/clean-mame/actions/workflows/release.yml
+[rust-shield]: https://img.shields.io/badge/Rust-stable-orange?logo=rust
+[rust-url]: https://www.rust-lang.org/tools/install
+[edition-shield]: https://img.shields.io/badge/Rust%20Edition-2024-orange?logo=rust
+[edition-url]: https://doc.rust-lang.org/edition-guide/rust-2024/index.html
+[license-shield]: https://img.shields.io/github/license/PlagueHO/clean-mame
+[license-url]: https://github.com/PlagueHO/clean-mame/blob/main/LICENSE

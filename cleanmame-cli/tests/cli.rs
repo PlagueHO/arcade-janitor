@@ -277,6 +277,40 @@ fn rom_stats_filters_categories_and_can_show_missing_roms() {
 }
 
 #[test]
+fn rom_stats_shows_detailed_missing_and_unmatched_roms_only_when_requested() {
+    let directory = fixture();
+    let rom_dir = directory.path().join("roms");
+    let mut default_arguments = vec![
+        "rom".to_string(),
+        "stats".to_string(),
+        rom_dir.display().to_string(),
+        "--output".to_string(),
+        "json".to_string(),
+    ];
+    default_arguments.extend(source_args(directory.path()));
+
+    command()
+        .args(&default_arguments)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""missing": 1"#))
+        .stdout(predicate::str::contains(r#""unmatched": 1"#))
+        .stdout(predicate::str::contains(r#""missing_roms""#).not())
+        .stdout(predicate::str::contains(r#""unmatched_roms""#).not());
+
+    let mut detailed_arguments = default_arguments;
+    detailed_arguments.extend(["--show-missing".to_string(), "--show-unmatched".to_string()]);
+    command()
+        .args(detailed_arguments)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""missing_roms": ["#))
+        .stdout(predicate::str::contains(r#""galaga""#))
+        .stdout(predicate::str::contains(r#""unmatched_roms": ["#))
+        .stdout(predicate::str::contains(r#""unknown""#));
+}
+
+#[test]
 fn rom_stats_accepts_comma_separated_categories() {
     let directory = fixture();
     let mut arguments = vec![

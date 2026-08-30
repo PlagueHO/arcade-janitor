@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added CI, release, Rust toolchain, Rust edition, and license badges to the project README.
+- Added the CleanMAME logo to the project README.
+- Added `rom stats --show-unmatched` to list uncatalogued ROM archives.
 - Added automated standalone Linux, macOS, and Windows release packages for version tags.
 - Added this Keep a Changelog 1.1.0-formatted changelog.
 - Added simple GitHub issue forms for bug reports, feature requests, and support questions.
@@ -28,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Documented CleanMAME's focus on simple, agent-friendly ROM folder cleanup.
 - Replaced the unpublished CLI with a consistent resource-first `rom`, `catalog`,
   `category`, and `source` command structure.
 - Clarified `rom stats` category output with total, available, missing, and unmatched counts.
@@ -42,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed source cache-clear previews to consistently report the requested clear action.
 - Fixed CLI workspace builds after adding category data to operation output.
 - Fixed `--include-mechanical` filtering so it can include non-runnable mechanical entries.
 - Fixed move and delete output to report accurate source and destination paths and preview

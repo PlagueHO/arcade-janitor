@@ -167,7 +167,7 @@ async fn run_rom(
                 &args.selectors,
                 true,
             )?;
-            let stats = CollectionStats::from_roms(&roms, args.show_missing);
+            let stats = CollectionStats::from_roms(&roms, args.show_missing, args.show_unmatched);
             render_stats(&stats, presentation)?;
         }
         RomCommands::Audit(args) => {
@@ -344,7 +344,7 @@ fn run_source(
                     subcategory: None,
                     source: entry.path.display().to_string(),
                     destination: None,
-                    action: if entry.exists { "clear" } else { "skip" }.to_string(),
+                    action: "clear".to_string(),
                     state: if args.execute { "executed" } else { "preview" }.to_string(),
                 })
                 .collect::<Vec<_>>();
@@ -664,10 +664,12 @@ struct CollectionStats {
     by_category: BTreeMap<String, CategoryStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
     missing_roms: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unmatched_roms: Option<Vec<String>>,
 }
 
 impl CollectionStats {
-    fn from_roms(roms: &[RomEntry], show_missing: bool) -> Self {
+    fn from_roms(roms: &[RomEntry], show_missing: bool, show_unmatched: bool) -> Self {
         let mut by_category = BTreeMap::new();
         for rom in roms {
             let category = category_of(rom).unwrap_or("Unknown").to_string();
@@ -705,6 +707,12 @@ impl CollectionStats {
                     .filter(|rom| {
                         rom.rom_path.is_none() && rom.catalogued && rom.metadata.flags.runnable
                     })
+                    .map(|rom| rom.name.clone())
+                    .collect()
+            }),
+            unmatched_roms: show_unmatched.then(|| {
+                roms.iter()
+                    .filter(|rom| rom.rom_path.is_some() && !rom.catalogued)
                     .map(|rom| rom.name.clone())
                     .collect()
             }),
@@ -1031,6 +1039,13 @@ fn render_stats(stats: &CollectionStats, options: &PresentationOptions) -> Resul
             missing_roms
                 .iter()
                 .map(|name| vec!["missing_rom".to_string(), name.clone()]),
+        );
+    }
+    if let Some(unmatched_roms) = &stats.unmatched_roms {
+        rows.extend(
+            unmatched_roms
+                .iter()
+                .map(|name| vec!["unmatched_rom".to_string(), name.clone()]),
         );
     }
     render(stats, &["metric", "count"], rows, options)
