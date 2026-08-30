@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed release publication when attaching platform packages.
 - Fixed metadata downloads panicking when ROM commands run without an existing catver cache.
 - Fixed CI and release workflows to use Node.js 24-compatible actions and avoid
   warnings from an unused Homebrew tap on macOS runners.
