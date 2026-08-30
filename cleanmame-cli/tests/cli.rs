@@ -2,6 +2,7 @@ use std::path::Path;
 
 use assert_cmd::{Command, cargo::cargo_bin};
 use predicates::prelude::*;
+use serde_json::Value;
 use tempfile::TempDir;
 
 fn command() -> Command {
@@ -37,6 +38,71 @@ fn source_args(directory: &Path) -> [String; 4] {
         "--catver".to_string(),
         directory.join("catver.ini").display().to_string(),
     ]
+}
+
+fn large_fixture() -> (&'static Path, &'static Path) {
+    (
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/fixtures/mame-100.xml"
+        )),
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/fixtures/catver-100.ini"
+        )),
+    )
+}
+
+#[test]
+fn scans_committed_100_entry_fixture_with_temporary_roms() {
+    let directory = tempfile::tempdir().unwrap();
+    let roms = directory.path().join("roms");
+    std::fs::create_dir(&roms).unwrap();
+    for name in [
+        "game001.zip",
+        "game050.7z",
+        "game100.zip",
+        "not-in-catalog.zip",
+    ] {
+        std::fs::write(roms.join(name), b"fixture rom").unwrap();
+    }
+    let (mame_xml, catver) = large_fixture();
+
+    let catalog_output = command()
+        .args([
+            "catalog",
+            "list",
+            "--output",
+            "json",
+            "--mame-xml",
+            mame_xml.to_str().unwrap(),
+            "--catver",
+            catver.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(catalog_output.status.success());
+    let catalog: Value = serde_json::from_slice(&catalog_output.stdout).unwrap();
+    assert_eq!(catalog.as_array().unwrap().len(), 100);
+
+    command()
+        .args([
+            "rom",
+            "list",
+            roms.to_str().unwrap(),
+            "--output",
+            "json",
+            "--mame-xml",
+            mame_xml.to_str().unwrap(),
+            "--catver",
+            catver.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""name": "game001""#))
+        .stdout(predicate::str::contains(r#""name": "game050""#))
+        .stdout(predicate::str::contains(r#""name": "game100""#))
+        .stdout(predicate::str::contains("not-in-catalog").not());
 }
 
 #[test]
@@ -206,6 +272,7 @@ fn rom_stats_filters_categories_and_can_show_missing_roms() {
         .success()
         .stdout(predicate::str::contains(r#""missing_roms""#))
         .stdout(predicate::str::contains(r#""galaga""#))
+        .stdout(predicate::str::contains(r#""available": 0"#))
         .stdout(predicate::str::contains(r#""missing": 1"#));
 }
 

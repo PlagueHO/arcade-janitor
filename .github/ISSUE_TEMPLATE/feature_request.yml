@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an improvement or new capability for CleanMAME.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please search existing issues before submitting.
+  - type: textarea
+    id: need
+    attributes:
+      label: What problem would this solve?
+      description: Explain the use case and who would benefit.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+      description: Describe the desired behavior or interface.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or alternative approaches have you tried?

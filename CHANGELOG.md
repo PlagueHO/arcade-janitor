@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added automated standalone Linux, macOS, and Windows release packages for version tags.
 - Added this Keep a Changelog 1.1.0-formatted changelog.
+- Added simple GitHub issue forms for bug reports, feature requests, and support questions.
+- Added a pull request template with summary, testing, and review checklists.
+- Added committed 100-entry integration fixtures and end-to-end CLI and MCP HTTP tests.
+- Added VS Code tasks for running the CLI and MCP integration test suites together or separately.
 - Added automatic extraction and OS cache reuse for MAME XML metadata.
 - Added a modern, color-aware CLI help layout with a CleanMAME logo in interactive terminals.
 - Improved the Windows MCP build task to initialize the Visual C++ toolchain automatically.
@@ -25,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replaced the unpublished CLI with a consistent resource-first `rom`, `catalog`,
   `category`, and `source` command structure.
+- Clarified `rom stats` category output with total, available, missing, and unmatched counts.
 - Changed ROM move, delete, and cache clearing to preview by default and require
   `--execute` before modifying files.
 - Changed metadata source and output controls into global options with environment-variable

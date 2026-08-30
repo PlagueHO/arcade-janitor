@@ -1,0 +1,25 @@
+name: Question or support
+description: Ask for help using CleanMAME.
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include enough detail for someone else to reproduce or answer your question.
+        For bugs and feature ideas, use the dedicated forms instead.
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: What have you tried?
+      description: Include relevant commands, configuration, output, and environment details.
+      render: shell
+    validations:
+      required: true

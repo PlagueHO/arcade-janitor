@@ -623,12 +623,20 @@ fn plan_delete(roms: &[RomEntry]) -> Result<Vec<OperationResult>> {
 }
 
 #[derive(Serialize)]
+struct CategoryStats {
+    total: usize,
+    available: usize,
+    missing: usize,
+    unmatched: usize,
+}
+
+#[derive(Serialize)]
 struct CollectionStats {
     total: usize,
     available: usize,
     missing: usize,
     unmatched: usize,
-    by_category: BTreeMap<String, usize>,
+    by_category: BTreeMap<String, CategoryStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
     missing_roms: Option<Vec<String>>,
 }
@@ -638,7 +646,19 @@ impl CollectionStats {
         let mut by_category = BTreeMap::new();
         for rom in roms {
             let category = category_of(rom).unwrap_or("Unknown").to_string();
-            *by_category.entry(category).or_default() += 1;
+            let stats = by_category.entry(category).or_insert(CategoryStats {
+                total: 0,
+                available: 0,
+                missing: 0,
+                unmatched: 0,
+            });
+            stats.total += 1;
+            match (rom.rom_path.is_some(), rom.catalogued) {
+                (true, true) => stats.available += 1,
+                (false, true) => stats.missing += 1,
+                (true, false) => stats.unmatched += 1,
+                (false, false) => {}
+            }
         }
         Self {
             total: roms.len(),
@@ -960,7 +980,26 @@ fn render_stats(stats: &CollectionStats, options: &PresentationOptions) -> Resul
         stats
             .by_category
             .iter()
-            .map(|(category, count)| vec![format!("category:{category}"), count.to_string()]),
+            .flat_map(|(category, category_stats)| {
+                [
+                    vec![
+                        format!("category:{category}:total"),
+                        category_stats.total.to_string(),
+                    ],
+                    vec![
+                        format!("category:{category}:available"),
+                        category_stats.available.to_string(),
+                    ],
+                    vec![
+                        format!("category:{category}:missing"),
+                        category_stats.missing.to_string(),
+                    ],
+                    vec![
+                        format!("category:{category}:unmatched"),
+                        category_stats.unmatched.to_string(),
+                    ],
+                ]
+            }),
     );
     if let Some(missing_roms) = &stats.missing_roms {
         rows.extend(

@@ -3,8 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
 
 permissions:
   contents: read
@@ -16,7 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
@@ -31,10 +36,79 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      - run: cargo build --workspace --release
+      - name: Verify semantic version tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must match vX.Y.Z, got: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+      - run: cargo build -p cleanmame-cli -p cleanmame-mcp --release
+      - name: Package Unix binaries
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          archive="cleanmame-${GITHUB_REF_NAME}-${PLATFORM}.tar.gz"
+          mkdir -p package
+          cp target/release/cleanmame target/release/cleanmame-mcp package/
+          tar -czf "$archive" -C package cleanmame cleanmame-mcp
+      - name: Package Windows binaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          $archive = "cleanmame-$env:GITHUB_REF_NAME-$env:PLATFORM.zip"
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          Copy-Item target/release/cleanmame.exe, target/release/cleanmame-mcp.exe -Destination package
+          Compress-Archive -Path package/* -DestinationPath $archive
       - uses: actions/upload-artifact@v4
         with:
-          name: cleanmame-${{ runner.os }}
-          path: |
-            target/release/cleanmame-cli*
-            target/release/cleanmame-mcp*
+          name: cleanmame-${{ matrix.platform }}
+          path: cleanmame-${{ github.ref_name }}-${{ matrix.platform }}.*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: cleanmame-*
+          merge-multiple: true
+      - name: Extract changelog entry
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          if grep -Fxq "## [$version]" CHANGELOG.md; then
+            heading="## [$version]"
+          else
+            heading="## [Unreleased]"
+          fi
+          awk -v heading="$heading" '
+            $0 == heading { found=1; next }
+            found && $0 ~ /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            echo "CHANGELOG.md has no entry for [$version] or [Unreleased]" >&2
+            exit 1
+          fi
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* \
+          --title "CleanMAME ${{ github.ref_name }}" \
+          --notes-file release-notes.md

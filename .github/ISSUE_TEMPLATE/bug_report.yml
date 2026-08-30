@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible problem with CleanMAME.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve CleanMAME. Please search existing issues before submitting.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and include the command or endpoint involved.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      description: Include the smallest command, configuration, or input that demonstrates the problem.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: CleanMAME version or commit
+      placeholder: "e.g. 0.1.0 or abc1234"
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your OS and any relevant MAME version or client.
+      placeholder: "e.g. Windows 11, MAME 0.287"

@@ -151,6 +151,27 @@ connections from non-local browser origins are rejected.
 
 ## Development
 
+### Integration tests
+
+The integration suite keeps a deterministic, cut-down metadata dataset in
+[`tests/fixtures/`](tests/fixtures): 100 MAME XML machines and 100 catver entries.
+Each CLI and MCP integration test creates its ROM folder under a `tempfile`
+directory and writes only small fake ROM files, so tests never use or modify the
+developer's CleanMAME cache or ROM collection.
+
+Run the end-to-end suites with:
+
+```powershell
+cargo test -p cleanmame-cli --test cli
+cargo test -p cleanmame-mcp --test http_integration
+```
+
+The CLI test launches the compiled binary and verifies JSON output. The MCP
+test launches the server on an ephemeral localhost port and calls the
+`scan_roms` tool through `POST /mcp`, which is the recommended boundary for
+testing an HTTP MCP server. Lower-level handler tests remain useful for fast
+protocol edge cases; use both layers rather than mocking the server transport.
+
 ### Windows prerequisites
 
 The Windows Rust toolchain in this project targets MSVC. Install the **Desktop
