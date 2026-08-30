@@ -43,8 +43,7 @@ const LOGO: &str = "
 \x1b[38;5;87m    +--------------------------------+\n\
 \x1b[0m";
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::from_arg_matches(&cli_command().get_matches())?;
     let source = cli.source.apply_environment();
     validate_source_options(&source)?;
@@ -52,7 +51,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Rom(command) => {
-            run_rom(command.command, &source, &cli.presentation).await?;
+            run_rom(command.command, &source, &cli.presentation)?;
         }
         Commands::Catalog(command) => {
             run_catalog(command.command, &source, &cli.presentation)?;
@@ -141,14 +140,14 @@ fn validate_source_options(source: &SourceOptions) -> Result<()> {
     Ok(())
 }
 
-async fn run_rom(
+fn run_rom(
     command: RomCommands,
     source: &SourceOptions,
     presentation: &PresentationOptions,
 ) -> Result<()> {
     match command {
         RomCommands::List(args) => {
-            let mut roms = scan_roms(&args.rom_dir, source, presentation).await?;
+            let mut roms = scan_roms(&args.rom_dir, source, presentation)?;
             roms.retain(|rom| matches_status(rom, args.status));
             let include_non_runnable = matches!(args.status, RomStatus::Unmatched | RomStatus::All);
             roms = select_roms(roms, &args.selectors, include_non_runnable)?;
@@ -156,14 +155,14 @@ async fn run_rom(
             render_roms(&roms, presentation)?;
         }
         RomCommands::Show(args) => {
-            let roms = scan_roms(&args.rom_dir, source, presentation).await?;
+            let roms = scan_roms(&args.rom_dir, source, presentation)?;
             let rom = find_by_name(&roms, &args.name)
                 .with_context(|| format!("ROM '{}' was not found", args.name))?;
             render_roms(std::slice::from_ref(rom), presentation)?;
         }
         RomCommands::Stats(args) => {
             let roms = select_roms(
-                scan_roms(&args.rom_dir, source, presentation).await?,
+                scan_roms(&args.rom_dir, source, presentation)?,
                 &args.selectors,
                 true,
             )?;
@@ -171,7 +170,7 @@ async fn run_rom(
             render_stats(&stats, presentation)?;
         }
         RomCommands::Audit(args) => {
-            let roms = scan_roms(&args.rom_dir, source, presentation).await?;
+            let roms = scan_roms(&args.rom_dir, source, presentation)?;
             let findings = audit_collection(&args.rom_dir, &roms)?;
             let failed = findings.iter().any(|finding| finding.level >= args.fail_on);
             render_audit(&findings, presentation)?;
@@ -182,7 +181,7 @@ async fn run_rom(
         RomCommands::Move(args) => {
             require_mutation_selection(&args.selectors)?;
             let selected = select_roms(
-                scan_roms(&args.rom_dir, source, presentation).await?,
+                scan_roms(&args.rom_dir, source, presentation)?,
                 &args.selectors,
                 true,
             )?
@@ -211,7 +210,7 @@ async fn run_rom(
         RomCommands::Delete(args) => {
             require_mutation_selection(&args.selectors)?;
             let selected = select_roms(
-                scan_roms(&args.rom_dir, source, presentation).await?,
+                scan_roms(&args.rom_dir, source, presentation)?,
                 &args.selectors,
                 true,
             )?
@@ -382,7 +381,7 @@ fn run_source(
     Ok(())
 }
 
-async fn scan_roms(
+fn scan_roms(
     rom_dir: &Path,
     source: &SourceOptions,
     presentation: &PresentationOptions,

@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed metadata downloads panicking when ROM commands run without an existing catver cache.
 - Fixed CI and release workflows to use Node.js 24-compatible actions and avoid
   warnings from an unused Homebrew tap on macOS runners.
 - Fixed source cache-clear previews to consistently report the requested clear action.
