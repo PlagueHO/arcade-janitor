@@ -2,9 +2,7 @@ use std::{
     collections::BTreeMap, future::Future, net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc,
 };
 
-use arcadejanitor_core::metadata::{
-    MameXmlSource, resolve_catver_path, resolve_mame_xml, resolve_mame_xml_path,
-};
+use arcadejanitor_core::metadata::{resolve_catver_path, resolve_mame_xml_path};
 use arcadejanitor_core::operations::{
     delete::delete_roms,
     filter::{FilterOptions, filter_roms},
@@ -22,6 +20,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use clap::{Parser, ValueEnum};
 use mcp_core_rs::{
     Resource, Tool,
     content::Content,
@@ -36,24 +35,97 @@ use mcp_error_rs::{Error as McpError, Result as McpResult};
 use mcp_server_rs::router::{capabilities::CapabilitiesBuilder, traits::Router as McpRouter};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::TcpListener,
+};
 use tracing::{info, warn};
 
 const SERVER_NAME: &str = "arcadejanitor";
 
+#[derive(Clone, Debug, Parser)]
+#[command(name = "arcadejanitor-mcp", about = "Serve ArcadeJanitor MCP tools")]
+struct ServerOptions {
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "ARCADEJANITOR_MAME_ROM_FOLDER",
+        help = "Directory containing ROM archives"
+    )]
+    rom_folder: PathBuf,
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "ARCADEJANITOR_MAME_XML",
+        conflicts_with = "mame_executable",
+        help = "Read MAME metadata from this XML file"
+    )]
+    mame_xml: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "ARCADEJANITOR_MAME_EXECUTABLE",
+        help = "Extract MAME metadata using this executable"
+    )]
+    mame_executable: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        env = "ARCADEJANITOR_CATVER",
+        help = "Read category metadata from this catver.ini file"
+    )]
+    catver: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = Transport::Http)]
+    transport: Transport,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum Transport {
+    #[default]
+    Http,
+    Stdio,
+}
+
+#[derive(Clone, Debug)]
+struct ServerConfiguration {
+    rom_folder: PathBuf,
+    mame_xml: PathBuf,
+    catver: PathBuf,
+}
+
+impl ServerConfiguration {
+    fn resolve(options: ServerOptions) -> anyhow::Result<Self> {
+        let mame_xml = resolve_mame_xml_path(
+            options.mame_xml.as_deref(),
+            options.mame_executable.as_deref(),
+        )?;
+        let catver = resolve_catver_path(options.catver.as_deref())?;
+        Ok(Self {
+            rom_folder: options.rom_folder,
+            mame_xml,
+            catver,
+        })
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
     auth_token: Option<Arc<str>>,
+    configuration: Arc<ServerConfiguration>,
 }
 
 #[derive(Clone)]
 struct ArcadeJanitorRouter {
     destructive_tools_allowed: bool,
+    configuration: Arc<ServerConfiguration>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     arcadejanitor_core::utils::logging::init_logging();
+    let options = ServerOptions::parse();
+    let transport = options.transport;
+    let configuration = Arc::new(ServerConfiguration::resolve(options)?);
     let addr: SocketAddr = std::env::var("ARCADEJANITOR_MCP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:3000".to_string())
         .parse()?;
@@ -62,9 +134,14 @@ async fn main() -> anyhow::Result<()> {
             .ok()
             .filter(|token| !token.is_empty())
             .map(Arc::<str>::from),
+        configuration,
     };
     if state.auth_token.is_none() {
         warn!("destructive MCP tools are disabled; set ARCADEJANITOR_MCP_TOKEN to enable them");
+    }
+
+    if matches!(transport, Transport::Stdio) {
+        return serve_stdio(state).await;
     }
 
     let app = Router::new()
@@ -140,7 +217,31 @@ async fn mcp_handler(
 fn router_for_request(state: &AppState, headers: &HeaderMap) -> ArcadeJanitorRouter {
     ArcadeJanitorRouter {
         destructive_tools_allowed: is_authorized(state, headers),
+        configuration: Arc::clone(&state.configuration),
     }
+}
+
+async fn serve_stdio(state: AppState) -> anyhow::Result<()> {
+    let router = ArcadeJanitorRouter {
+        destructive_tools_allowed: state.auth_token.is_some(),
+        configuration: state.configuration,
+    };
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    let mut stdout = tokio::io::stdout();
+    while let Some(line) = lines.next_line().await? {
+        let response = match serde_json::from_str::<WireRequest>(&line) {
+            Ok(request) => handle_wire_request(router.clone(), request).await,
+            Err(error) => Some(wire_error(None, -32700, error.to_string())),
+        };
+        if let Some(response) = response {
+            stdout
+                .write_all(serde_json::to_string(&response)?.as_bytes())
+                .await?;
+            stdout.write_all(b"\n").await?;
+            stdout.flush().await?;
+        }
+    }
+    Ok(())
 }
 
 fn is_authorized(state: &AppState, headers: &HeaderMap) -> bool {
@@ -244,7 +345,7 @@ async fn handle_wire_request(
     )
     .await?;
     Some(WireResponse {
-        jsonrpc: response.jsonrpc,
+        jsonrpc: request.jsonrpc,
         id: Some(id),
         result: response.result,
         error: response.error,
@@ -302,15 +403,18 @@ impl McpRouter for ArcadeJanitorRouter {
     ) -> Pin<Box<dyn Future<Output = McpResult<Vec<Content>>> + Send + 'static>> {
         let tool_name = tool_name.to_string();
         let destructive_tools_allowed = self.destructive_tools_allowed;
+        let configuration = Arc::clone(&self.configuration);
         Box::pin(async move {
             if is_destructive_tool(&tool_name) && !destructive_tools_allowed {
                 return Err(McpError::Protocol(
                     "authorization is required for destructive tools".to_string(),
                 ));
             }
-            let response = tokio::task::spawn_blocking(move || execute_tool(&tool_name, arguments))
-                .await
-                .map_err(|error| McpError::System(error.to_string()))?;
+            let response = tokio::task::spawn_blocking(move || {
+                execute_tool(&tool_name, arguments, &configuration)
+            })
+            .await
+            .map_err(|error| McpError::System(error.to_string()))?;
             if response.get("ok").and_then(Value::as_bool) == Some(true) {
                 Ok(vec![Content::text(response.to_string())])
             } else {
@@ -356,39 +460,38 @@ fn is_destructive_tool(tool_name: &str) -> bool {
     matches!(tool_name, "move_roms" | "delete_roms")
 }
 
-fn execute_tool(tool_name: &str, args: Value) -> Value {
+fn execute_tool(tool_name: &str, args: Value, configuration: &ServerConfiguration) -> Value {
     match tool_name {
-        "scan_roms" => scan_roms(args),
-        "query_metadata" => query_metadata(args),
-        "filter_roms" => filter_roms_tool(args),
-        "show_mame_xml" => show_mame_xml_tool(args),
-        "filter_mame_metadata" => filter_mame_metadata_tool(args),
-        "move_roms" => move_roms_tool(args),
-        "delete_roms" => delete_roms_tool(args),
-        "generate_report" => generate_report_tool(args),
-        "list_catver" => list_catver_tool(args),
+        "scan_roms" => scan_roms(args, configuration),
+        "query_metadata" => query_metadata(args, configuration),
+        "filter_roms" => filter_roms_tool(args, configuration),
+        "show_mame_xml" => show_mame_xml_tool(args, configuration),
+        "filter_mame_metadata" => filter_mame_metadata_tool(args, configuration),
+        "move_roms" => move_roms_tool(args, configuration),
+        "delete_roms" => delete_roms_tool(args, configuration),
+        "generate_report" => generate_report_tool(args, configuration),
+        "list_catver" => list_catver_tool(args, configuration),
         _ => json!({ "ok": false, "error": format!("unknown tool '{tool_name}'") }),
     }
 }
 
-fn scan_roms(args: Value) -> Value {
-    match parse_metadata_args(args).and_then(|args| {
-        let catver = resolve_catver_path(args.catver.as_deref())?;
-        let mame_xml =
-            resolve_mame_xml_path(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
-        scan_rom_folder(args.rom_folder, mame_xml, Some(catver)).map_err(anyhow::Error::from)
+fn scan_roms(args: Value, configuration: &ServerConfiguration) -> Value {
+    match parse_metadata_args(args).and_then(|_| {
+        scan_rom_folder(
+            &configuration.rom_folder,
+            &configuration.mame_xml,
+            Some(&configuration.catver),
+        )
+        .map_err(anyhow::Error::from)
     }) {
         Ok(roms) => json!({ "ok": true, "roms": roms }),
         Err(error) => json!({ "ok": false, "error": error.to_string() }),
     }
 }
 
-fn query_metadata(args: Value) -> Value {
+fn query_metadata(args: Value, configuration: &ServerConfiguration) -> Value {
     match parse_query_args(args).and_then(|args| {
-        let catver = resolve_catver_path(args.catver.as_deref())?;
-        let mame_xml =
-            resolve_mame_xml_path(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
-        let roms = load_metadata(mame_xml, Some(catver))?;
+        let roms = load_metadata(&configuration.mame_xml, Some(&configuration.catver))?;
         find_by_name(&roms, &args.name)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("ROM '{}' was not found", args.name))
@@ -398,16 +501,15 @@ fn query_metadata(args: Value) -> Value {
     }
 }
 
-fn filter_roms_tool(args: Value) -> Value {
+fn filter_roms_tool(args: Value, configuration: &ServerConfiguration) -> Value {
     match parse_filter_args(args).and_then(|args| {
         let mut options = args.options;
         options.only_available = true;
-        let catver = resolve_catver_path(args.metadata.catver.as_deref())?;
-        let mame_xml = resolve_mame_xml_path(
-            args.metadata.mame_xml.as_deref(),
-            args.metadata.mame_executable.as_deref(),
+        let roms = scan_rom_folder(
+            &configuration.rom_folder,
+            &configuration.mame_xml,
+            Some(&configuration.catver),
         )?;
-        let roms = scan_rom_folder(args.metadata.rom_folder, mame_xml, Some(catver))?;
         Ok::<_, anyhow::Error>(filter_roms(&roms, &options))
     }) {
         Ok(roms) => json!({ "ok": true, "roms": roms }),
@@ -415,16 +517,15 @@ fn filter_roms_tool(args: Value) -> Value {
     }
 }
 
-fn show_mame_xml_tool(args: Value) -> Value {
-    match parse_mame_xml_args(args).and_then(|args| {
-        let mame_xml = resolve_mame_xml(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
-        let metadata = std::fs::metadata(&mame_xml.path)?;
+fn show_mame_xml_tool(args: Value, configuration: &ServerConfiguration) -> Value {
+    match parse_mame_xml_args(args).and_then(|_| {
+        let metadata = std::fs::metadata(&configuration.mame_xml)?;
         let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?;
         Ok::<_, anyhow::Error>(json!({
             "ok": true,
             "mame_xml": {
-                "path": mame_xml.path,
-                "source": describe_mame_xml_source(&mame_xml.source),
+                "path": configuration.mame_xml,
+                "source": "server configuration",
                 "size_bytes": metadata.len(),
                 "modified_unix_seconds": modified.as_secs()
             }
@@ -435,16 +536,11 @@ fn show_mame_xml_tool(args: Value) -> Value {
     }
 }
 
-fn filter_mame_metadata_tool(args: Value) -> Value {
+fn filter_mame_metadata_tool(args: Value, configuration: &ServerConfiguration) -> Value {
     match parse_mame_filter_args(args).and_then(|args| {
         let mut options = args.options;
         options.only_available = false;
-        let catver = resolve_catver_path(args.metadata.catver.as_deref())?;
-        let mame_xml = resolve_mame_xml_path(
-            args.metadata.mame_xml.as_deref(),
-            args.metadata.mame_executable.as_deref(),
-        )?;
-        let roms = load_metadata(mame_xml, Some(catver))?;
+        let roms = load_metadata(&configuration.mame_xml, Some(&configuration.catver))?;
         Ok::<_, anyhow::Error>(filter_roms(&roms, &options))
     }) {
         Ok(roms) => json!({ "ok": true, "roms": roms }),
@@ -452,26 +548,15 @@ fn filter_mame_metadata_tool(args: Value) -> Value {
     }
 }
 
-fn describe_mame_xml_source(source: &MameXmlSource) -> String {
-    match source {
-        MameXmlSource::ExplicitPath => "explicit path".to_string(),
-        MameXmlSource::ExtractedFrom(executable) => {
-            format!("extracted from {}", executable.display())
-        }
-        MameXmlSource::Cache => "ArcadeJanitor cache".to_string(),
-    }
-}
-
-fn move_roms_tool(args: Value) -> Value {
+fn move_roms_tool(args: Value, configuration: &ServerConfiguration) -> Value {
     match parse_move_args(args).and_then(|args| {
         let mut options = args.filter.options;
         options.only_available = true;
-        let catver = resolve_catver_path(args.filter.metadata.catver.as_deref())?;
-        let mame_xml = resolve_mame_xml_path(
-            args.filter.metadata.mame_xml.as_deref(),
-            args.filter.metadata.mame_executable.as_deref(),
+        let roms = scan_rom_folder(
+            &configuration.rom_folder,
+            &configuration.mame_xml,
+            Some(&configuration.catver),
         )?;
-        let roms = scan_rom_folder(args.filter.metadata.rom_folder, mame_xml, Some(catver))?;
         let filtered = filter_roms(&roms, &options);
         move_roms(&filtered, args.target_folder, args.dry_run).map_err(anyhow::Error::from)
     }) {
@@ -480,16 +565,15 @@ fn move_roms_tool(args: Value) -> Value {
     }
 }
 
-fn delete_roms_tool(args: Value) -> Value {
+fn delete_roms_tool(args: Value, configuration: &ServerConfiguration) -> Value {
     match parse_delete_args(args).and_then(|args| {
         let mut options = args.filter.options;
         options.only_available = true;
-        let catver = resolve_catver_path(args.filter.metadata.catver.as_deref())?;
-        let mame_xml = resolve_mame_xml_path(
-            args.filter.metadata.mame_xml.as_deref(),
-            args.filter.metadata.mame_executable.as_deref(),
+        let roms = scan_rom_folder(
+            &configuration.rom_folder,
+            &configuration.mame_xml,
+            Some(&configuration.catver),
         )?;
-        let roms = scan_rom_folder(args.filter.metadata.rom_folder, mame_xml, Some(catver))?;
         let filtered = filter_roms(&roms, &options);
         delete_roms(&filtered, args.dry_run).map_err(anyhow::Error::from)
     }) {
@@ -498,22 +582,23 @@ fn delete_roms_tool(args: Value) -> Value {
     }
 }
 
-fn generate_report_tool(args: Value) -> Value {
-    match parse_metadata_args(args).and_then(|args| {
-        let catver = resolve_catver_path(args.catver.as_deref())?;
-        let mame_xml =
-            resolve_mame_xml_path(args.mame_xml.as_deref(), args.mame_executable.as_deref())?;
-        scan_rom_folder(args.rom_folder, mame_xml, Some(catver)).map_err(anyhow::Error::from)
+fn generate_report_tool(args: Value, configuration: &ServerConfiguration) -> Value {
+    match parse_metadata_args(args).and_then(|_| {
+        scan_rom_folder(
+            &configuration.rom_folder,
+            &configuration.mame_xml,
+            Some(&configuration.catver),
+        )
+        .map_err(anyhow::Error::from)
     }) {
         Ok(roms) => json!({ "ok": true, "report": generate_report(&roms) }),
         Err(error) => json!({ "ok": false, "error": error.to_string() }),
     }
 }
 
-fn list_catver_tool(args: Value) -> Value {
+fn list_catver_tool(args: Value, configuration: &ServerConfiguration) -> Value {
     match parse_catver_args(args).and_then(|args| {
-        let catver = resolve_catver_path(args.catver.as_deref())?;
-        let mut entries = arcadejanitor_core::parsers::catver::parse_catver_file(catver)?
+        let mut entries = arcadejanitor_core::parsers::catver::parse_catver_file(&configuration.catver)?
             .into_iter()
             .map(|(name, genre)| CatverEntry {
                 name,
@@ -627,27 +712,27 @@ fn tools() -> Vec<Tool> {
     vec![
         Tool::new(
             "scan_roms",
-            "Scan a ROM folder using mame.xml and optional catver.ini",
+            "Scan the configured ROM folder",
             metadata_schema(),
         ),
         Tool::new(
             "query_metadata",
-            "Query metadata for one ROM name",
+            "Query configured metadata for one ROM name",
             query_schema(),
         ),
         Tool::new(
             "filter_roms",
-            "Filter available ROMs by metadata",
+            "Filter available ROMs in the configured folder by metadata",
             filter_schema(),
         ),
         Tool::new(
             "show_mame_xml",
-            "Show the resolved MAME XML source and file details",
+            "Show the configured MAME XML source and file details",
             mame_xml_schema(),
         ),
         Tool::new(
             "filter_mame_metadata",
-            "Filter MAME XML metadata without requiring a ROM folder",
+            "Filter configured MAME XML metadata",
             mame_filter_schema(),
         ),
         Tool::new(
@@ -672,13 +757,7 @@ fn tools() -> Vec<Tool> {
 fn metadata_schema() -> Value {
     json!({
         "type": "object",
-        "properties": {
-            "rom_folder": { "type": "string" },
-            "mame_xml": { "type": ["string", "null"] },
-            "mame_executable": { "type": ["string", "null"] },
-            "catver": { "type": ["string", "null"] }
-        },
-        "required": ["rom_folder"],
+        "properties": {},
         "additionalProperties": false
     })
 }
@@ -687,10 +766,7 @@ fn query_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "name": { "type": "string" },
-            "mame_xml": { "type": ["string", "null"] },
-            "mame_executable": { "type": ["string", "null"] },
-            "catver": { "type": ["string", "null"] }
+            "name": { "type": "string" }
         },
         "required": ["name"],
         "additionalProperties": false
@@ -700,10 +776,7 @@ fn query_schema() -> Value {
 fn mame_xml_schema() -> Value {
     json!({
         "type": "object",
-        "properties": {
-            "mame_xml": { "type": ["string", "null"] },
-            "mame_executable": { "type": ["string", "null"] }
-        },
+        "properties": {},
         "additionalProperties": false
     })
 }
@@ -712,21 +785,7 @@ fn mame_filter_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "metadata": mame_metadata_schema(),
             "options": filter_options_schema()
-        },
-        "required": ["metadata"],
-        "additionalProperties": false
-    })
-}
-
-fn mame_metadata_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "mame_xml": { "type": ["string", "null"] },
-            "mame_executable": { "type": ["string", "null"] },
-            "catver": { "type": ["string", "null"] }
         },
         "additionalProperties": false
     })
@@ -736,10 +795,8 @@ fn filter_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "metadata": metadata_schema(),
             "options": filter_options_schema()
         },
-        "required": ["metadata"],
         "additionalProperties": false
     })
 }
@@ -822,7 +879,6 @@ fn catver_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "catver": { "type": ["string", "null"] },
             "query": { "type": ["string", "null"] },
             "list": { "enum": ["categories", "subcategories", "entries"] }
         },
@@ -832,49 +888,28 @@ fn catver_schema() -> Value {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct MetadataArgs {
-    rom_folder: PathBuf,
-    mame_xml: Option<PathBuf>,
-    mame_executable: Option<PathBuf>,
-    catver: Option<PathBuf>,
-}
+struct MetadataArgs {}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct QueryArgs {
     name: String,
-    mame_xml: Option<PathBuf>,
-    mame_executable: Option<PathBuf>,
-    catver: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct MameXmlArgs {
-    mame_xml: Option<PathBuf>,
-    mame_executable: Option<PathBuf>,
-}
+struct MameXmlArgs {}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MameFilterArgs {
-    metadata: QueryMetadataArgs,
     #[serde(default)]
     options: FilterOptions,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct QueryMetadataArgs {
-    mame_xml: Option<PathBuf>,
-    mame_executable: Option<PathBuf>,
-    catver: Option<PathBuf>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FilterArgs {
-    metadata: MetadataArgs,
     #[serde(default)]
     options: FilterOptions,
 }
@@ -899,7 +934,6 @@ struct DeleteArgs {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CatverArgs {
-    catver: Option<PathBuf>,
     query: Option<String>,
     #[serde(default)]
     list: CatverList,
@@ -938,11 +972,57 @@ struct CatverSubcategory {
 mod tests {
     use super::*;
 
+    fn test_configuration() -> Arc<ServerConfiguration> {
+        Arc::new(ServerConfiguration {
+            rom_folder: PathBuf::from("roms"),
+            mame_xml: PathBuf::from("mame.xml"),
+            catver: PathBuf::from("catver.ini"),
+        })
+    }
+
+    #[test]
+    fn requires_a_rom_folder_and_rejects_conflicting_mame_sources() {
+        assert!(ServerOptions::try_parse_from(["arcadejanitor-mcp"]).is_err());
+        assert!(
+            ServerOptions::try_parse_from([
+                "arcadejanitor-mcp",
+                "--rom-folder",
+                "roms",
+                "--mame-xml",
+                "mame.xml",
+                "--mame-executable",
+                "mame",
+            ])
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn preserves_the_json_rpc_version_for_wire_requests() {
+        let response = handle_wire_request(
+            ArcadeJanitorRouter {
+                destructive_tools_allowed: false,
+                configuration: test_configuration(),
+            },
+            WireRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(WireId::Number(1)),
+                method: "tools/list".to_string(),
+                params: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.jsonrpc, "2.0");
+    }
+
     #[tokio::test]
     async fn lists_required_tools_with_schemas_and_preserves_request_id() {
         let response = handle_request(
             ArcadeJanitorRouter {
                 destructive_tools_allowed: true,
+                configuration: test_configuration(),
             },
             JsonRpcRequest::new(Some(42), "tools/list", None),
         )
@@ -958,7 +1038,8 @@ mod tests {
             .iter()
             .find(|tool| tool["name"] == "scan_roms")
             .unwrap();
-        assert_eq!(scan["inputSchema"]["required"], json!(["rom_folder"]));
+        assert!(scan["inputSchema"]["required"].is_null());
+        assert_eq!(scan["inputSchema"]["properties"], json!({}));
         assert!(tools.iter().any(|tool| tool["name"] == "generate_report"));
         assert!(tools.iter().any(|tool| tool["name"] == "list_catver"));
         assert!(tools.iter().any(|tool| tool["name"] == "show_mame_xml"));
@@ -972,7 +1053,10 @@ mod tests {
     #[tokio::test]
     async fn responds_accepted_to_notifications() {
         let response = mcp_handler(
-            State(AppState { auth_token: None }),
+            State(AppState {
+                auth_token: None,
+                configuration: test_configuration(),
+            }),
             HeaderMap::new(),
             Json(json!({
                 "jsonrpc": "2.0",
@@ -991,6 +1075,11 @@ mod tests {
         let target_folder = folder.join("target");
         let mame_xml = folder.join("mame.xml");
         let catver = folder.join("catver.ini");
+        let configuration = ServerConfiguration {
+            rom_folder: rom_folder.clone(),
+            mame_xml: mame_xml.clone(),
+            catver: catver.clone(),
+        };
         std::fs::create_dir_all(&rom_folder).unwrap();
         std::fs::write(rom_folder.join("available.zip"), "").unwrap();
         std::fs::write(
@@ -1004,30 +1093,21 @@ mod tests {
             "move_roms",
             json!({
                 "filter": {
-                    "metadata": {
-                        "rom_folder": rom_folder,
-                        "mame_xml": mame_xml,
-                        "catver": catver
-                    }
                 },
                 "target_folder": target_folder,
                 "dry_run": true
             }),
+            &configuration,
         );
 
         assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
         let response = execute_tool(
             "delete_roms",
             json!({
-                "filter": {
-                    "metadata": {
-                        "rom_folder": rom_folder,
-                        "mame_xml": mame_xml,
-                        "catver": catver
-                    }
-                },
+                "filter": {},
                 "dry_run": true
             }),
+            &configuration,
         );
 
         assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
@@ -1040,6 +1120,11 @@ mod tests {
             std::env::temp_dir().join(format!("arcadejanitor-mcp-catver-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let catver = folder.join("catver.ini");
+        let configuration = ServerConfiguration {
+            rom_folder: folder.join("roms"),
+            mame_xml: folder.join("mame.xml"),
+            catver: catver.clone(),
+        };
         std::fs::write(
             &catver,
             "[Category]\ngalaga=Shooter / Flying Vertical\ngalaxian=Shooter / Flying Horizontal\npacman=Maze / Chase\n",
@@ -1049,10 +1134,10 @@ mod tests {
         let response = execute_tool(
             "list_catver",
             json!({
-                "catver": catver,
                 "query": "vertical",
                 "list": "subcategories"
             }),
+            &configuration,
         );
 
         assert_eq!(
@@ -1078,6 +1163,11 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let mame_xml = folder.join("mame.xml");
         let catver = folder.join("catver.ini");
+        let configuration = ServerConfiguration {
+            rom_folder: folder.join("roms"),
+            mame_xml: mame_xml.clone(),
+            catver: catver.clone(),
+        };
         std::fs::write(
             &mame_xml,
             r#"<mame><machine name="pacman"><description>Pac-Man</description></machine><machine name="galaga"><description>Galaga</description></machine></mame>"#,
@@ -1089,17 +1179,17 @@ mod tests {
         )
         .unwrap();
 
-        let show = execute_tool("show_mame_xml", json!({ "mame_xml": mame_xml }));
+        let show = execute_tool("show_mame_xml", json!({}), &configuration);
         assert_eq!(show["ok"], true);
-        assert_eq!(show["mame_xml"]["source"], "explicit path");
+        assert_eq!(show["mame_xml"]["source"], "server configuration");
         assert!(show["mame_xml"]["size_bytes"].as_u64().is_some());
 
         let filtered = execute_tool(
             "filter_mame_metadata",
             json!({
-                "metadata": { "mame_xml": mame_xml, "catver": catver },
                 "options": { "genre_contains": "shooter" }
             }),
+            &configuration,
         );
         assert_eq!(filtered["ok"], true);
         assert_eq!(filtered["roms"][0]["name"], "galaga");
@@ -1111,6 +1201,7 @@ mod tests {
     fn requires_bearer_authentication_for_destructive_tools() {
         let state = AppState {
             auth_token: Some(Arc::from("token")),
+            configuration: test_configuration(),
         };
         let mut headers = HeaderMap::new();
 

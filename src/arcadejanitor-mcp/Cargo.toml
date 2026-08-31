@@ -9,6 +9,7 @@ repository.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 arcadejanitor-core = { path = "../arcadejanitor-core" }
+clap.workspace = true
 mcp-core-rs.workspace = true
 mcp-error-rs.workspace = true
 mcp-server-rs.workspace = true

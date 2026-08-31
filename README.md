@@ -76,6 +76,7 @@ arcadejanitor
 ├── catalog    list, show
 ├── category   list, show
 ├── source     list, refresh, clear
+├── mcp        start, install
 └── completions
 ```
 
@@ -98,6 +99,8 @@ Use `arcadejanitor <resource> --help` and
 ./arcadejanitor rom stats ./roms --show-missing --show-unmatched --output json --mame-xml ./mame.xml
 ./arcadejanitor rom audit ./roms --mame-xml ./mame.xml
 ./arcadejanitor source list --output table
+./arcadejanitor mcp start ./roms --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor mcp install vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
 ./arcadejanitor completions powershell
 ```
 
@@ -116,65 +119,95 @@ The source options `--mame-xml`, `--mame-executable`, and `--catver` are global 
 appear before or after a subcommand. Their environment variable equivalents are
 `ARCADEJANITOR_MAME_XML`, `ARCADEJANITOR_MAME_EXECUTABLE`, and `ARCADEJANITOR_CATVER`.
 
-Start the MCP server:
+## MCP Server
+
+The MCP server manages exactly one ROM collection. It requires `--rom-folder <path>` or
+`ARCADEJANITOR_MAME_ROM_FOLDER`; MCP tools never accept a ROM folder, MAME XML source, MAME
+executable, or catver path. This prevents an agent from operating on an unintended folder or
+metadata source.
+
+The server accepts the same metadata source options as the CLI: `--mame-xml`,
+`--mame-executable`, and `--catver`, with `ARCADEJANITOR_MAME_XML`,
+`ARCADEJANITOR_MAME_EXECUTABLE`, and `ARCADEJANITOR_CATVER` as their respective environment
+variables. It uses the same automatic MAME XML extraction, catver download, and per-user OS cache
+as the CLI.
+
+Start the HTTP server with explicit configuration:
 
 ```bash
-./arcadejanitor-mcp
+./arcadejanitor-mcp --rom-folder ./roms --mame-xml ./mame.xml --catver ./catver.ini
 ```
+
+The CLI can start the packaged MCP server with the same metadata source options:
+
+```bash
+./arcadejanitor mcp start ./roms --mame-xml ./mame.xml --catver ./catver.ini
+```
+
+### Install in an agentic development system
+
+Use `arcadejanitor mcp install <system> <rom-folder>` to install the packaged MCP server as a
+user-scoped stdio server. The supported systems are `vscode`, `copilot-cli`, and `claude-code`.
+Installation replaces the existing `arcadejanitor` server entry for that system without changing
+other configured servers.
+
+```bash
+./arcadejanitor mcp install vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor mcp install copilot-cli ./roms --mame-executable /path/to/mame
+./arcadejanitor mcp install claude-code ./roms
+```
+
+The command uses each system's native user-scope registration interface: VS Code's active user
+profile, GitHub Copilot CLI's `~/.copilot/mcp-config.json`, and Claude Code's user-scoped
+configuration. The target client command (`code`, `copilot`, or `claude`) must be available on
+`PATH`.
 
 The server listens on `http://127.0.0.1:3000` by default. Keep it running in a
 separate terminal while using an MCP client. Set `ARCADEJANITOR_MCP_ADDR` to change
 the listen address. Set `ARCADEJANITOR_MCP_TOKEN` to enable the destructive tools
 (`move_roms` and `delete_roms`).
 
-### Install in VS Code
+### VS Code configuration
 
-Start the extracted MCP server:
-
-```bash
-./arcadejanitor-mcp
-```
-
-Create `.vscode/mcp.json` in your workspace (or use **MCP: Open User
-Configuration** from the Command Palette) with:
+Use stdio to let VS Code start a configured server directly. Create `.vscode/mcp.json` in your
+workspace (or use **MCP: Open User Configuration** from the Command Palette):
 
 ```json
 {
   "servers": {
     "arcadejanitor": {
-      "type": "http",
-      "url": "http://127.0.0.1:3000/mcp"
+      "type": "stdio",
+      "command": "/absolute/path/to/arcadejanitor-mcp",
+      "args": [
+        "--transport", "stdio",
+        "--rom-folder", "/absolute/path/to/roms",
+        "--mame-xml", "/absolute/path/to/mame.xml",
+        "--catver", "/absolute/path/to/catver.ini"
+      ],
+      "env": {
+        "ARCADEJANITOR_MCP_TOKEN": "replace-with-a-secret-token"
+      }
     }
   }
 }
 ```
 
-Save the file, then use the MCP tools from GitHub Copilot Chat. If
-`ARCADEJANITOR_MCP_TOKEN` is set, add the matching bearer token to the
-configuration's `headers` object:
+Replace the command-line settings with the corresponding environment variables in this `env`
+object if preferred.
 
-```json
-"headers": {
-  "Authorization": "Bearer YOUR_TOKEN"
-}
-```
+### GitHub Copilot CLI configuration
 
-### Install in GitHub Copilot CLI
-
-Start the server in a separate terminal:
+Register a configured stdio server:
 
 ```bash
-./arcadejanitor-mcp
+copilot mcp add --transport stdio arcadejanitor -- \
+  /absolute/path/to/arcadejanitor-mcp --transport stdio \
+  --rom-folder /absolute/path/to/roms --mame-xml /absolute/path/to/mame.xml \
+  --catver /absolute/path/to/catver.ini
 ```
 
-Register its Streamable HTTP endpoint with Copilot CLI:
-
-```bash
-copilot mcp add --transport http arcadejanitor http://127.0.0.1:3000/mcp
-```
-
-The configuration is saved to `~/.copilot/mcp-config.json`. To use
-destructive tools, include the token when registering the server:
+The configuration is saved to `~/.copilot/mcp-config.json`. To use a manually started HTTP server
+instead, register its endpoint with the token header when destructive tools are enabled:
 
 ```bash
 copilot mcp add --transport http \
@@ -191,9 +224,9 @@ Endpoints:
 - `POST /mcp` (MCP JSON-RPC)
 - `GET /ws`
 
-Set `ARCADEJANITOR_MCP_TOKEN` to enable the destructive MCP tools; without it, those tools are
-unavailable. Clients must authenticate using the standard HTTP authorization header. WebSocket
-connections from non-local browser origins are rejected.
+Set `ARCADEJANITOR_MCP_TOKEN` to enable destructive MCP tools. HTTP clients must authenticate
+using the standard HTTP authorization header. WebSocket connections from non-local browser origins
+are rejected.
 
 ## Development
 

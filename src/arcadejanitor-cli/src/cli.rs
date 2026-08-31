@@ -132,6 +132,8 @@ pub enum Commands {
     Category(CategoryCommand),
     #[command(about = "Inspect and manage metadata sources")]
     Source(SourceCommand),
+    #[command(about = "Start the ArcadeJanitor MCP server")]
+    Mcp(McpCommand),
     #[command(about = "Generate shell completion scripts")]
     Completions(CompletionsArgs),
 }
@@ -321,6 +323,44 @@ pub enum SourceCommands {
     Refresh(SourceTargetArgs),
     #[command(about = "Preview or execute clearing managed metadata caches")]
     Clear(SourceClearArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct McpCommand {
+    #[command(subcommand)]
+    pub command: McpCommands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum McpCommands {
+    #[command(about = "Start the MCP server for a ROM folder")]
+    Start(McpStartArgs),
+    #[command(about = "Install the MCP server in an agentic development system")]
+    Install(McpInstallArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct McpStartArgs {
+    #[arg(value_name = "ROM_DIR", help = "Directory containing ROM archives")]
+    pub rom_dir: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct McpInstallArgs {
+    #[arg(value_enum, help = "Agentic development system to configure")]
+    pub system: McpSystem,
+    #[arg(value_name = "ROM_DIR", help = "Directory containing ROM archives")]
+    pub rom_dir: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum McpSystem {
+    #[value(name = "vscode")]
+    VsCode,
+    #[value(name = "copilot-cli")]
+    CopilotCli,
+    #[value(name = "claude-code")]
+    ClaudeCode,
 }
 
 #[derive(Args, Debug)]

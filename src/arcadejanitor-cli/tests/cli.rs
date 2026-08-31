@@ -117,7 +117,7 @@ fn top_level_help_exposes_resource_groups() {
     let help = String::from_utf8(output).unwrap();
 
     assert!(help.contains("Inspect and manage MAME ROM collections"));
-    for resource in ["rom", "catalog", "category", "source", "completions"] {
+    for resource in ["rom", "catalog", "category", "source", "mcp", "completions"] {
         assert!(help.contains(resource), "missing resource {resource}");
     }
     for removed in [
@@ -146,6 +146,7 @@ fn nested_help_is_complete_and_consistent() {
         ("catalog", &["list", "show"][..]),
         ("category", &["list", "show"][..]),
         ("source", &["list", "refresh", "clear"][..]),
+        ("mcp", &["start", "install"][..]),
     ] {
         let output = command()
             .args([group, "--help"])

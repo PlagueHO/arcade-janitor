@@ -3,9 +3,11 @@ mod cli;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap},
+    ffi::OsString,
     fs,
     io::IsTerminal,
     path::{Path, PathBuf},
+    process::Command,
     time::SystemTime,
 };
 
@@ -30,11 +32,13 @@ use clap::{
     builder::styling::{AnsiColor, Styles},
 };
 use cli::{
-    AuditLevel, CatalogCommands, CategoryCommands, Cli, ColorMode, Commands, OrderingArgs,
-    OutputFormat, PresentationOptions, RegionArg, RomCommands, RomStatus, SelectorArgs, SortField,
-    SourceCommands, SourceOptions, SourceTarget,
+    AuditLevel, CatalogCommands, CategoryCommands, Cli, ColorMode, Commands, McpCommands,
+    McpInstallArgs, McpStartArgs, McpSystem, OrderingArgs, OutputFormat, PresentationOptions,
+    RegionArg, RomCommands, RomStatus, SelectorArgs, SortField, SourceCommands, SourceOptions,
+    SourceTarget,
 };
 use serde::Serialize;
+use serde_json::json;
 
 const LOGO: &str = concat!(
     "\n\x1b[38;5;39m",
@@ -70,6 +74,9 @@ fn main() -> Result<()> {
         }
         Commands::Source(command) => {
             run_source(command.command, &source, &cli.presentation)?;
+        }
+        Commands::Mcp(command) => {
+            run_mcp(command.command, &source)?;
         }
         Commands::Completions(args) => {
             clap_complete::generate(
@@ -147,6 +154,158 @@ fn validate_source_options(source: &SourceOptions) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn run_mcp(command: McpCommands, source: &SourceOptions) -> Result<()> {
+    match command {
+        McpCommands::Start(args) => start_mcp_server(args, source),
+        McpCommands::Install(args) => install_mcp_server(args, source),
+    }
+}
+
+fn start_mcp_server(args: McpStartArgs, source: &SourceOptions) -> Result<()> {
+    let executable = mcp_server_executable()?;
+    let mut command = Command::new(&executable);
+    command.arg("--rom-folder").arg(args.rom_dir);
+    command.args(mcp_source_arguments(source));
+
+    let status = command
+        .status()
+        .with_context(|| format!("failed to start MCP server at {}", executable.display()))?;
+    if !status.success() {
+        bail!("MCP server exited with status {status}");
+    }
+    Ok(())
+}
+
+fn mcp_server_executable() -> Result<PathBuf> {
+    let executable =
+        std::env::current_exe().context("could not determine the CLI executable path")?;
+    let file_name = format!("arcadejanitor-mcp{}", std::env::consts::EXE_SUFFIX);
+    Ok(executable.with_file_name(file_name))
+}
+
+fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()> {
+    let mcp_executable = mcp_server_executable()?;
+    let server_arguments = mcp_server_arguments(&args.rom_dir, source);
+    let command = mcp_install_command(args.system, &mcp_executable, &server_arguments)?;
+    let status = Command::new(&command.program)
+        .args(&command.arguments)
+        .status()
+        .with_context(|| {
+            format!(
+                "failed to run {} while installing the MCP server; ensure it is installed and available on PATH",
+                command.program.display(),
+            )
+        })?;
+    if !status.success() {
+        bail!(
+            "{} exited with status {status} while installing the MCP server",
+            command.program.display()
+        );
+    }
+    Ok(())
+}
+
+fn mcp_server_arguments(rom_dir: &Path, source: &SourceOptions) -> Vec<OsString> {
+    let mut arguments = vec![
+        OsString::from("--transport"),
+        OsString::from("stdio"),
+        OsString::from("--rom-folder"),
+        rom_dir.as_os_str().to_os_string(),
+    ];
+    arguments.extend(mcp_source_arguments(source));
+    arguments
+}
+
+fn mcp_source_arguments(source: &SourceOptions) -> Vec<OsString> {
+    let mut arguments = Vec::new();
+    if let Some(path) = &source.mame_xml {
+        arguments.extend([
+            OsString::from("--mame-xml"),
+            path.as_os_str().to_os_string(),
+        ]);
+    }
+    if let Some(path) = &source.mame_executable {
+        arguments.extend([
+            OsString::from("--mame-executable"),
+            path.as_os_str().to_os_string(),
+        ]);
+    }
+    if let Some(path) = &source.catver {
+        arguments.extend([OsString::from("--catver"), path.as_os_str().to_os_string()]);
+    }
+    arguments
+}
+
+struct InstallCommand {
+    program: OsString,
+    arguments: Vec<OsString>,
+}
+
+fn mcp_install_command(
+    system: McpSystem,
+    mcp_executable: &Path,
+    server_arguments: &[OsString],
+) -> Result<InstallCommand> {
+    let server_command = mcp_executable
+        .to_str()
+        .context("MCP server executable path is not valid Unicode")?;
+    match system {
+        McpSystem::VsCode => {
+            let arguments = server_arguments
+                .iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            let configuration = json!({
+                "name": "arcadejanitor",
+                "type": "stdio",
+                "command": server_command,
+                "args": arguments,
+            });
+            Ok(InstallCommand {
+                program: OsString::from("code"),
+                arguments: vec![
+                    OsString::from("--add-mcp"),
+                    OsString::from(serde_json::to_string(&configuration)?),
+                ],
+            })
+        }
+        McpSystem::CopilotCli => {
+            let mut arguments = vec![
+                OsString::from("mcp"),
+                OsString::from("add"),
+                OsString::from("--transport"),
+                OsString::from("stdio"),
+                OsString::from("arcadejanitor"),
+                OsString::from("--"),
+                mcp_executable.as_os_str().to_os_string(),
+            ];
+            arguments.extend_from_slice(server_arguments);
+            Ok(InstallCommand {
+                program: OsString::from("copilot"),
+                arguments,
+            })
+        }
+        McpSystem::ClaudeCode => {
+            let mut arguments = vec![
+                OsString::from("mcp"),
+                OsString::from("add"),
+                OsString::from("--scope"),
+                OsString::from("user"),
+                OsString::from("--transport"),
+                OsString::from("stdio"),
+                OsString::from("arcadejanitor"),
+                OsString::from("--"),
+                mcp_executable.as_os_str().to_os_string(),
+            ];
+            arguments.extend_from_slice(server_arguments);
+            Ok(InstallCommand {
+                program: OsString::from("claude"),
+                arguments,
+            })
+        }
+    }
 }
 
 fn run_rom(
@@ -1249,5 +1408,104 @@ mod tests {
         assert_eq!(parse_year_selector("1980").unwrap(), (1980, 1980));
         assert_eq!(parse_year_selector("1980..1985").unwrap(), (1980, 1985));
         assert!(parse_year_selector("1985..1980").is_err());
+    }
+
+    #[test]
+    fn builds_client_install_commands_with_fixed_stdio_configuration() {
+        let source = SourceOptions {
+            mame_xml: Some(PathBuf::from("mame.xml")),
+            catver: Some(PathBuf::from("catver.ini")),
+            ..Default::default()
+        };
+        let server_arguments = mcp_server_arguments(Path::new("roms"), &source);
+        let executable = Path::new("arcadejanitor-mcp");
+
+        let vscode = mcp_install_command(McpSystem::VsCode, executable, &server_arguments).unwrap();
+        assert_eq!(vscode.program, OsString::from("code"));
+        assert_eq!(vscode.arguments[0], OsString::from("--add-mcp"));
+        let configuration: serde_json::Value =
+            serde_json::from_str(&vscode.arguments[1].to_string_lossy()).unwrap();
+        assert_eq!(configuration["name"], "arcadejanitor");
+        assert_eq!(configuration["type"], "stdio");
+        assert_eq!(configuration["command"], "arcadejanitor-mcp");
+        assert_eq!(
+            configuration["args"],
+            json!([
+                "--transport",
+                "stdio",
+                "--rom-folder",
+                "roms",
+                "--mame-xml",
+                "mame.xml",
+                "--catver",
+                "catver.ini",
+            ])
+        );
+
+        let copilot =
+            mcp_install_command(McpSystem::CopilotCli, executable, &server_arguments).unwrap();
+        assert_eq!(copilot.program, OsString::from("copilot"));
+        assert_eq!(
+            copilot.arguments,
+            vec![
+                "mcp",
+                "add",
+                "--transport",
+                "stdio",
+                "arcadejanitor",
+                "--",
+                "arcadejanitor-mcp",
+                "--transport",
+                "stdio",
+                "--rom-folder",
+                "roms",
+                "--mame-xml",
+                "mame.xml",
+                "--catver",
+                "catver.ini",
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>()
+        );
+
+        let claude =
+            mcp_install_command(McpSystem::ClaudeCode, executable, &server_arguments).unwrap();
+        assert_eq!(claude.program, OsString::from("claude"));
+        assert_eq!(
+            &claude.arguments[..7],
+            [
+                OsString::from("mcp"),
+                OsString::from("add"),
+                OsString::from("--scope"),
+                OsString::from("user"),
+                OsString::from("--transport"),
+                OsString::from("stdio"),
+                OsString::from("arcadejanitor"),
+            ]
+        );
+    }
+
+    #[test]
+    fn forwards_the_mame_executable_to_installed_servers() {
+        let source = SourceOptions {
+            mame_executable: Some(PathBuf::from("mame")),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            mcp_server_arguments(Path::new("roms"), &source),
+            vec![
+                "--transport",
+                "stdio",
+                "--rom-folder",
+                "roms",
+                "--mame-executable",
+                "mame",
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>()
+        );
     }
 }

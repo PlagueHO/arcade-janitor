@@ -115,6 +115,7 @@ dependencies = [
  "anyhow",
  "arcadejanitor-core",
  "axum",
+ "clap",
  "mcp-core-rs",
  "mcp-error-rs",
  "mcp-server-rs",

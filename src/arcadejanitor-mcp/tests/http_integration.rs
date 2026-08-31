@@ -15,8 +15,16 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn start_server(port: u16) -> Child {
+fn start_server(port: u16, rom_folder: &Path, mame_xml: &Path, catver: &Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_arcadejanitor-mcp"))
+        .args([
+            "--rom-folder",
+            rom_folder.to_str().unwrap(),
+            "--mame-xml",
+            mame_xml.to_str().unwrap(),
+            "--catver",
+            catver.to_str().unwrap(),
+        ])
         .env("ARCADEJANITOR_MCP_ADDR", format!("127.0.0.1:{port}"))
         .spawn()
         .unwrap()
@@ -59,7 +67,9 @@ fn serves_mcp_tools_over_http_using_committed_fixture_and_temp_roms() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
-    let mut server = start_server(port);
+    let mame_xml = fixture("mame-100.xml");
+    let catver = fixture("catver-100.ini");
+    let mut server = start_server(port, &roms, &mame_xml, &catver);
     let client = Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -67,16 +77,7 @@ fn serves_mcp_tools_over_http_using_committed_fixture_and_temp_roms() {
     let url = format!("http://127.0.0.1:{port}");
     wait_for_server(&client, &url);
 
-    let response = call_tool(
-        &client,
-        &url,
-        "scan_roms",
-        json!({
-            "rom_folder": roms,
-            "mame_xml": fixture("mame-100.xml"),
-            "catver": fixture("catver-100.ini")
-        }),
-    );
+    let response = call_tool(&client, &url, "scan_roms", json!({}));
     assert_eq!(response["result"]["isError"], Value::Null);
     let content = response["result"]["content"][0]["text"].as_str().unwrap();
     let payload: Value = serde_json::from_str(content).unwrap();
