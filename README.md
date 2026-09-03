@@ -306,3 +306,7 @@ cargo test --workspace
 [edition-url]: https://doc.rust-lang.org/edition-guide/rust-2024/index.html
 [license-shield]: https://img.shields.io/github/license/PlagueHO/arcade-janitor
 [license-url]: https://github.com/PlagueHO/arcade-janitor/blob/main/LICENSE
+
+## License
+
+ArcadeJanitor is licensed under the [MIT License](LICENSE).

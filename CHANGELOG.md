@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated installation and usage documentation for downloadable release binaries.
 - Configured MCP servers now use a fixed required ROM folder and shared metadata source settings.
+- Added MIT license information to the README.
 
 ### Added
 
