@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added contributor guidance, shared VS Code Rust quality settings, and formatting
+  and lint tasks.
+- Added deterministic Rust setup steps for GitHub Copilot coding agent sessions.
 - Added stdio MCP server support for direct VS Code and Copilot CLI configuration.
 - Added `arcadejanitor mcp start` to launch the packaged MCP server for a ROM folder.
 - Added `arcadejanitor mcp install` to configure the MCP server for VS Code, GitHub Copilot CLI,
