@@ -541,3 +541,33 @@ fn stats_and_explicit_mutations_include_unmatched_archives() {
         .stdout(predicate::str::contains(r#""name": "unknown""#))
         .stdout(predicate::str::contains(r#""state": "preview""#));
 }
+
+#[test]
+fn reports_metadata_and_rom_folder_errors() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing_roms = directory.path().join("missing-roms");
+    let mut arguments = vec![
+        "rom".to_string(),
+        "list".to_string(),
+        missing_roms.display().to_string(),
+    ];
+    arguments.extend(source_args(directory.path()));
+    command()
+        .args(arguments)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("I/O error"));
+
+    command()
+        .args([
+            "catalog",
+            "list",
+            "--mame-xml",
+            directory.path().join("missing.xml").to_str().unwrap(),
+            "--catver",
+            directory.path().join("catver.ini").to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("I/O error"));
+}

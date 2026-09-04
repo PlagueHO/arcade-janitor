@@ -106,4 +106,44 @@ mod tests {
         assert_eq!(fs::read_to_string(&target).unwrap(), "target");
         fs::remove_dir_all(folder).unwrap();
     }
+
+    #[test]
+    fn previews_move_without_creating_target_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.zip");
+        let target_folder = directory.path().join("moved");
+        fs::write(&source, b"source").unwrap();
+        let mut rom = RomEntry::new("source");
+        rom.rom_path = Some(source.clone());
+
+        assert_eq!(
+            move_roms(&[rom], &target_folder, true).unwrap(),
+            vec!["source"]
+        );
+        assert!(source.is_file());
+        assert!(!target_folder.exists());
+    }
+
+    #[test]
+    fn moves_files_and_reports_missing_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.zip");
+        let target_folder = directory.path().join("moved");
+        fs::write(&source, b"source").unwrap();
+        let mut rom = RomEntry::new("source");
+        rom.rom_path = Some(source.clone());
+
+        assert_eq!(
+            move_roms(std::slice::from_ref(&rom), &target_folder, false).unwrap(),
+            vec!["source"]
+        );
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read(target_folder.join("source.zip")).unwrap(),
+            b"source"
+        );
+
+        let error = move_roms(&[RomEntry::new("missing")], &target_folder, true).unwrap_err();
+        assert!(matches!(error, ArcadeJanitorError::MissingPath(name) if name == "missing"));
+    }
 }

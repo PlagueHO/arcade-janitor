@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `arcadejanitor mcp start` to launch the packaged MCP server for a ROM folder.
 - Added `arcadejanitor mcp install` to configure the MCP server for VS Code, GitHub Copilot CLI,
   or Claude Code.
+- Added integration coverage for metadata failures, ROM deletion and movement edge cases, and
+  CLI error handling.
 
 ## [0.1.0] - 2026-08-30
 

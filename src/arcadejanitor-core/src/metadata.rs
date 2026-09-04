@@ -399,4 +399,40 @@ mod tests {
         );
         fs::remove_dir_all(directory).unwrap();
     }
+
+    #[test]
+    fn rejects_invalid_downloaded_catver_without_caching_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request).unwrap();
+            let body = "[Category]\n";
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let cached_path = directory.path().join("catver.ini");
+
+        assert!(matches!(
+            download_catver_from(&cached_path, &url),
+            Err(ArcadeJanitorError::InvalidCatverDownload)
+        ));
+        assert!(!cached_path.exists());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn reports_download_failures() {
+        let directory = tempfile::tempdir().unwrap();
+        let cached_path = directory.path().join("catver.ini");
+
+        let error = download_catver_from(&cached_path, "http://127.0.0.1:1").unwrap_err();
+        assert!(matches!(error, ArcadeJanitorError::CatverDownload { .. }));
+    }
 }
