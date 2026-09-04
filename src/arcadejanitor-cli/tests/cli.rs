@@ -166,6 +166,17 @@ fn nested_help_is_complete_and_consistent() {
 }
 
 #[test]
+fn mcp_install_help_displays_supported_systems() {
+    command()
+        .args(["mcp", "install", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "<vscode|copilot-cli|claude-code> <ROM_DIR>",
+        ));
+}
+
+#[test]
 fn legacy_commands_are_rejected() {
     for legacy in [
         "scan", "filter", "move", "delete", "report", "mame", "catver",

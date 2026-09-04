@@ -347,7 +347,12 @@ pub struct McpStartArgs {
 
 #[derive(Args, Debug)]
 pub struct McpInstallArgs {
-    #[arg(value_enum, help = "Agentic development system to configure")]
+    #[arg(
+        value_enum,
+        value_name = "vscode|copilot-cli|claude-code",
+        hide_possible_values = true,
+        help = "Agentic development system to configure"
+    )]
     pub system: McpSystem,
     #[arg(value_name = "ROM_DIR", help = "Directory containing ROM archives")]
     pub rom_dir: PathBuf,
