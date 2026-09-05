@@ -172,7 +172,7 @@ fn mcp_install_help_displays_supported_systems() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "<vscode|copilot-cli|claude-code> <ROM_DIR>",
+            "<vscode|vscode-insiders|copilot-cli|claude-code> <ROM_DIR>",
         ));
 }
 

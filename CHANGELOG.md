@@ -10,16 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added a VitePress documentation website with installation, CLI, MCP server, and development guides.
-
-### Changed
-
-- Displayed the supported systems directly in the `mcp install` command help.
-- Updated installation and usage documentation for downloadable release binaries.
-- Configured MCP servers now use a fixed required ROM folder and shared metadata source settings.
-- Added MIT license information to the README.
-
-### Added
-
+- Added VS Code Insiders as an `mcp install` target using the `code-insiders` CLI.
 - Added contributor guidance, shared VS Code Rust quality settings, and formatting
   and lint tasks.
 - Added automated Rust setup steps for GitHub Copilot coding agent sessions.
@@ -29,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or Claude Code.
 - Added integration coverage for metadata failures, ROM deletion and movement edge cases, and
   CLI error handling.
+
+### Changed
+
+- Displayed the supported systems directly in the `mcp install` command help.
+- Updated installation and usage documentation for downloadable release binaries.
+- Configured MCP servers now use a fixed required ROM folder and shared metadata source settings.
+- Added MIT license information to the README.
 
 ## [0.1.0] - 2026-08-30
 

@@ -252,7 +252,7 @@ fn mcp_install_command(
         .to_str()
         .context("MCP server executable path is not valid Unicode")?;
     match system {
-        McpSystem::VsCode => {
+        McpSystem::VsCode | McpSystem::VsCodeInsiders => {
             let arguments = server_arguments
                 .iter()
                 .map(|argument| argument.to_string_lossy().into_owned())
@@ -264,7 +264,11 @@ fn mcp_install_command(
                 "args": arguments,
             });
             Ok(InstallCommand {
-                program: OsString::from("code"),
+                program: OsString::from(match system {
+                    McpSystem::VsCode => "code",
+                    McpSystem::VsCodeInsiders => "code-insiders",
+                    _ => unreachable!("stable and Insiders VS Code targets only"),
+                }),
                 arguments: vec![
                     OsString::from("--add-mcp"),
                     OsString::from(serde_json::to_string(&configuration)?),
@@ -1441,6 +1445,11 @@ mod tests {
                 "catver.ini",
             ])
         );
+
+        let vscode_insiders =
+            mcp_install_command(McpSystem::VsCodeInsiders, executable, &server_arguments).unwrap();
+        assert_eq!(vscode_insiders.program, OsString::from("code-insiders"));
+        assert_eq!(vscode_insiders.arguments, vscode.arguments);
 
         let copilot =
             mcp_install_command(McpSystem::CopilotCli, executable, &server_arguments).unwrap();

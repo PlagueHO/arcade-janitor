@@ -40,13 +40,14 @@ or Claude Code:
 
 ```bash
 ./arcadejanitor mcp install vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor mcp install vscode-insiders ./roms --mame-xml ./mame.xml --catver ./catver.ini
 ./arcadejanitor mcp install copilot-cli ./roms --mame-executable /path/to/mame
 ./arcadejanitor mcp install claude-code ./roms
 ```
 
-The target client command (`code`, `copilot`, or `claude`) must be available on
-`PATH`. Re-running the command replaces only the existing `arcadejanitor` server
-entry for that client.
+The target client command (`code`, `code-insiders`, `copilot`, or `claude`) must
+be available on `PATH`. Re-running the command replaces only the existing
+`arcadejanitor` server entry for that client.
 
 ## VS Code configuration
 
