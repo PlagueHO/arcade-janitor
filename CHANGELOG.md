@@ -31,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed Windows MCP client installation when a supported CLI is exposed through a
-  `.cmd` or `.bat` PATH launcher.
+  `.cmd` or `.bat` PATH launcher, including Unicode program names and actionable
+  client-specific error messages.
 
 ## [0.1.0] - 2026-08-30
 

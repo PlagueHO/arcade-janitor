@@ -188,24 +188,22 @@ fn mcp_server_executable() -> Result<PathBuf> {
 fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()> {
     let mcp_executable = mcp_server_executable()?;
     let server_arguments = mcp_server_arguments(&args.rom_dir, source);
-    let command = resolve_install_command(mcp_install_command(
-        args.system,
-        &mcp_executable,
-        &server_arguments,
-    )?)?;
+    let command = mcp_install_command(args.system, &mcp_executable, &server_arguments)?;
+    let requested_program = command.program.clone();
+    let command = resolve_install_command(command)?;
     let status = Command::new(&command.program)
         .args(&command.arguments)
         .status()
         .with_context(|| {
             format!(
                 "failed to run {} while installing the MCP server; ensure it is installed and available on PATH",
-                command.program.display(),
+                Path::new(&requested_program).display(),
             )
         })?;
     if !status.success() {
         bail!(
             "{} exited with status {status} while installing the MCP server",
-            command.program.display()
+            Path::new(&requested_program).display()
         );
     }
     Ok(())
@@ -260,9 +258,8 @@ fn resolve_install_command(command: InstallCommand) -> Result<InstallCommand> {
 
 #[cfg(windows)]
 fn resolve_windows_install_command(command: InstallCommand) -> Result<InstallCommand> {
-    let requested_program = command.program.to_string_lossy();
     let output = Command::new("where.exe")
-        .arg(requested_program.as_ref())
+        .arg(command.program.as_os_str())
         .output()
         .with_context(|| {
             format!(
