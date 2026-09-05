@@ -1,5 +1,7 @@
 mod cli;
 
+#[cfg(windows)]
+use std::ffi::OsStr;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -189,19 +191,21 @@ fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()
     let mcp_executable = mcp_server_executable()?;
     let server_arguments = mcp_server_arguments(&args.rom_dir, source);
     let command = mcp_install_command(args.system, &mcp_executable, &server_arguments)?;
+    let requested_program = command.program.clone();
+    let command = resolve_install_command(command)?;
     let status = Command::new(&command.program)
         .args(&command.arguments)
         .status()
         .with_context(|| {
             format!(
                 "failed to run {} while installing the MCP server; ensure it is installed and available on PATH",
-                command.program.display(),
+                Path::new(&requested_program).display(),
             )
         })?;
     if !status.success() {
         bail!(
             "{} exited with status {status} while installing the MCP server",
-            command.program.display()
+            Path::new(&requested_program).display()
         );
     }
     Ok(())
@@ -241,6 +245,111 @@ fn mcp_source_arguments(source: &SourceOptions) -> Vec<OsString> {
 struct InstallCommand {
     program: OsString,
     arguments: Vec<OsString>,
+}
+
+fn resolve_install_command(command: InstallCommand) -> Result<InstallCommand> {
+    #[cfg(windows)]
+    {
+        resolve_windows_install_command(command)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(command)
+    }
+}
+
+#[cfg(windows)]
+fn resolve_windows_install_command(command: InstallCommand) -> Result<InstallCommand> {
+    let resolved_path = resolve_windows_program(command.program.as_os_str())?;
+    if is_windows_command_script(&resolved_path) {
+        Ok(wrap_windows_script_command(resolved_path, command))
+    } else {
+        Ok(InstallCommand {
+            program: resolved_path.into_os_string(),
+            arguments: command.arguments,
+        })
+    }
+}
+
+#[cfg(windows)]
+fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
+    let program_path = PathBuf::from(program);
+    let has_path = program_path.components().count() > 1;
+    let has_extension = program_path.extension().is_some();
+    let extensions = if has_extension {
+        vec![OsString::new()]
+    } else {
+        std::env::var_os("PATHEXT")
+            .and_then(|value| value.into_string().ok())
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .map(|extension| OsString::from(extension.trim().trim_start_matches('.')))
+            .collect()
+    };
+
+    let directories = if has_path {
+        vec![
+            program_path
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .to_path_buf(),
+        ]
+    } else {
+        std::env::var_os("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default()
+    };
+
+    for directory in directories {
+        for extension in &extensions {
+            let candidate = if has_path {
+                program_path.clone()
+            } else {
+                directory.join(&program_path)
+            };
+            let candidate = append_windows_extension(candidate, extension);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    bail!(
+        "{} was not found on PATH while installing the MCP server; ensure it is installed and available on PATH",
+        Path::new(program).display()
+    )
+}
+
+#[cfg(windows)]
+fn append_windows_extension(mut path: PathBuf, extension: &OsStr) -> PathBuf {
+    if !extension.is_empty() {
+        path.set_extension(extension);
+    }
+    path
+}
+
+#[cfg(windows)]
+fn wrap_windows_script_command(path: PathBuf, command: InstallCommand) -> InstallCommand {
+    let mut arguments = vec![
+        OsString::from("/D"),
+        OsString::from("/C"),
+        path.into_os_string(),
+    ];
+    arguments.extend(command.arguments);
+    InstallCommand {
+        program: std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe")),
+        arguments,
+    }
+}
+
+#[cfg(windows)]
+fn is_windows_command_script(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+        })
 }
 
 fn mcp_install_command(
@@ -1390,6 +1499,12 @@ fn format_table_row<'a>(cells: impl Iterator<Item = &'a str>, widths: &[usize]) 
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    use std::sync::{Mutex, OnceLock};
+
+    #[cfg(windows)]
+    static WINDOWS_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
     #[test]
     fn command_definition_is_valid() {
         Cli::command().debug_assert();
@@ -1515,6 +1630,93 @@ mod tests {
             .into_iter()
             .map(OsString::from)
             .collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn identifies_windows_command_script_launchers_case_insensitively() {
+        assert!(is_windows_command_script(Path::new("code-insiders.cmd")));
+        assert!(is_windows_command_script(Path::new("code-insiders.BAT")));
+        assert!(!is_windows_command_script(Path::new("code-insiders.exe")));
+        assert!(!is_windows_command_script(Path::new("code-insiders")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn appends_windows_extensions_without_corrupting_unicode_paths() {
+        let path = append_windows_extension(
+            PathBuf::from(r"C:\ユーザー\Visual Studio Code\bin\code"),
+            OsStr::new("cmd"),
+        );
+
+        assert_eq!(
+            path,
+            PathBuf::from(r"C:\ユーザー\Visual Studio Code\bin\code.cmd")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolves_command_script_from_path_with_pathext() {
+        let _lock = WINDOWS_ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let launcher = directory.path().join("code-insiders.cmd");
+        std::fs::write(&launcher, b"@echo off").unwrap();
+        let original_path = std::env::var_os("PATH");
+        let original_pathext = std::env::var_os("PATHEXT");
+
+        // SAFETY: The test serializes all environment mutation in this module and restores
+        // the process environment before returning.
+        unsafe {
+            std::env::set_var("PATH", directory.path());
+            std::env::set_var("PATHEXT", ".com; .cmd");
+        }
+        let resolved = resolve_windows_program(OsStr::new("code-insiders")).unwrap();
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            match original_pathext {
+                Some(pathext) => std::env::set_var("PATHEXT", pathext),
+                None => std::env::remove_var("PATHEXT"),
+            }
+        }
+
+        assert_eq!(resolved, launcher);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wraps_windows_command_scripts_with_comspec_without_losing_arguments() {
+        let command = wrap_windows_script_command(
+            PathBuf::from(r"C:\Program Files\Microsoft VS Code\bin\code.cmd"),
+            InstallCommand {
+                program: OsString::from("code"),
+                arguments: vec![
+                    OsString::from("--add-mcp"),
+                    OsString::from(r#"{"name":"arcadejanitor"}"#),
+                ],
+            },
+        );
+
+        assert_eq!(
+            command.program,
+            std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe"))
+        );
+        assert_eq!(
+            command.arguments,
+            vec![
+                OsString::from("/D"),
+                OsString::from("/C"),
+                OsString::from(r"C:\Program Files\Microsoft VS Code\bin\code.cmd"),
+                OsString::from("--add-mcp"),
+                OsString::from(r#"{"name":"arcadejanitor"}"#),
+            ]
         );
     }
 }
