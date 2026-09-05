@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a VitePress documentation website with installation, CLI, MCP server, and development guides.
+
 ### Changed
 
 - Displayed the supported systems directly in the `mcp install` command help.
