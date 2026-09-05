@@ -1,5 +1,7 @@
 mod cli;
 
+#[cfg(windows)]
+use std::ffi::OsStr;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -258,33 +260,7 @@ fn resolve_install_command(command: InstallCommand) -> Result<InstallCommand> {
 
 #[cfg(windows)]
 fn resolve_windows_install_command(command: InstallCommand) -> Result<InstallCommand> {
-    let output = Command::new("where.exe")
-        .arg(command.program.as_os_str())
-        .output()
-        .with_context(|| {
-            format!(
-                "failed to resolve {} on PATH while installing the MCP server",
-                command.program.display()
-            )
-        })?;
-    if !output.status.success() {
-        bail!(
-            "{} was not found on PATH while installing the MCP server; ensure it is installed and available on PATH",
-            command.program.display()
-        );
-    }
-
-    let resolved_path = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(PathBuf::from)
-        .with_context(|| {
-            format!(
-                "Windows PATH resolution returned no usable path for {}",
-                command.program.display()
-            )
-        })?;
+    let resolved_path = resolve_windows_program(command.program.as_os_str())?;
     if is_windows_command_script(&resolved_path) {
         Ok(wrap_windows_script_command(resolved_path, command))
     } else {
@@ -293,6 +269,51 @@ fn resolve_windows_install_command(command: InstallCommand) -> Result<InstallCom
             arguments: command.arguments,
         })
     }
+}
+
+#[cfg(windows)]
+fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
+    let program_path = PathBuf::from(program);
+    let has_path = program_path.components().count() > 1;
+    let has_extension = program_path.extension().is_some();
+    let extensions = if has_extension {
+        vec![OsString::new()]
+    } else {
+        std::env::var_os("PATHEXT")
+            .and_then(|value| value.into_string().ok())
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .map(OsString::from)
+            .collect()
+    };
+
+    let directories = if has_path {
+        vec![program_path.parent().unwrap_or_else(|| Path::new(""))]
+    } else {
+        std::env::var_os("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default()
+    };
+
+    for directory in directories {
+        for extension in &extensions {
+            let mut candidate = if has_path {
+                program_path.clone()
+            } else {
+                directory.join(&program_path)
+            };
+            candidate.push(extension);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    bail!(
+        "{} was not found on PATH while installing the MCP server; ensure it is installed and available on PATH",
+        Path::new(program).display()
+    )
 }
 
 #[cfg(windows)]
