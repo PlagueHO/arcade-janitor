@@ -284,7 +284,7 @@ fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
             .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
             .split(';')
             .filter(|extension| !extension.is_empty())
-            .map(OsString::from)
+            .map(|extension| OsString::from(extension.trim_start_matches('.')))
             .collect()
     };
 
@@ -324,12 +324,7 @@ fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
 #[cfg(windows)]
 fn append_windows_extension(mut path: PathBuf, extension: &OsStr) -> PathBuf {
     if !extension.is_empty() {
-        let mut file_name = path
-            .file_name()
-            .map(OsStr::to_os_string)
-            .unwrap_or_default();
-        file_name.push(extension);
-        path.set_file_name(file_name);
+        path.set_extension(extension);
     }
     path
 }
@@ -1504,6 +1499,12 @@ fn format_table_row<'a>(cells: impl Iterator<Item = &'a str>, widths: &[usize]) 
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    use std::sync::{Mutex, OnceLock};
+
+    #[cfg(windows)]
+    static WINDOWS_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
     #[test]
     fn command_definition_is_valid() {
         Cli::command().debug_assert();
@@ -1646,7 +1647,7 @@ mod tests {
     fn appends_windows_extensions_without_corrupting_unicode_paths() {
         let path = append_windows_extension(
             PathBuf::from(r"C:\ユーザー\Visual Studio Code\bin\code"),
-            OsStr::new(".cmd"),
+            OsStr::new("cmd"),
         );
 
         assert_eq!(
@@ -1657,13 +1658,34 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn resolves_unicode_command_script_paths_with_pathext() {
+    fn resolves_command_script_from_path_with_pathext() {
+        let _lock = WINDOWS_ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap();
         let directory = tempfile::tempdir().unwrap();
-        let launcher = directory.path().join("コード.cmd");
+        let launcher = directory.path().join("code-insiders.cmd");
         std::fs::write(&launcher, b"@echo off").unwrap();
-        let program = launcher.with_extension("");
+        let original_path = std::env::var_os("PATH");
+        let original_pathext = std::env::var_os("PATHEXT");
 
-        let resolved = resolve_windows_program(program.as_os_str()).unwrap();
+        // SAFETY: The test serializes all environment mutation in this module and restores
+        // the process environment before returning.
+        unsafe {
+            std::env::set_var("PATH", directory.path());
+            std::env::set_var("PATHEXT", ".CMD");
+        }
+        let resolved = resolve_windows_program(OsStr::new("code-insiders")).unwrap();
+        unsafe {
+            match original_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            match original_pathext {
+                Some(pathext) => std::env::set_var("PATHEXT", pathext),
+                None => std::env::remove_var("PATHEXT"),
+            }
+        }
 
         assert_eq!(resolved, launcher);
     }
