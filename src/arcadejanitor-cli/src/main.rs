@@ -1673,7 +1673,7 @@ mod tests {
         // the process environment before returning.
         unsafe {
             std::env::set_var("PATH", directory.path());
-            std::env::set_var("PATHEXT", ".CMD");
+            std::env::set_var("PATHEXT", ".cmd");
         }
         let resolved = resolve_windows_program(OsStr::new("code-insiders")).unwrap();
         unsafe {
