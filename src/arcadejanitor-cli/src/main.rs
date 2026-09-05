@@ -289,7 +289,12 @@ fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
     };
 
     let directories = if has_path {
-        vec![program_path.parent().unwrap_or_else(|| Path::new(""))]
+        vec![
+            program_path
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .to_path_buf(),
+        ]
     } else {
         std::env::var_os("PATH")
             .map(|path| std::env::split_paths(&path).collect())
@@ -298,12 +303,12 @@ fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
 
     for directory in directories {
         for extension in &extensions {
-            let mut candidate = if has_path {
+            let candidate = if has_path {
                 program_path.clone()
             } else {
                 directory.join(&program_path)
             };
-            candidate.push(extension);
+            let candidate = append_windows_extension(candidate, extension);
             if candidate.is_file() {
                 return Ok(candidate);
             }
@@ -314,6 +319,19 @@ fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
         "{} was not found on PATH while installing the MCP server; ensure it is installed and available on PATH",
         Path::new(program).display()
     )
+}
+
+#[cfg(windows)]
+fn append_windows_extension(mut path: PathBuf, extension: &OsStr) -> PathBuf {
+    if !extension.is_empty() {
+        let mut file_name = path
+            .file_name()
+            .map(OsStr::to_os_string)
+            .unwrap_or_default();
+        file_name.push(extension);
+        path.set_file_name(file_name);
+    }
+    path
 }
 
 #[cfg(windows)]
@@ -1621,6 +1639,20 @@ mod tests {
         assert!(is_windows_command_script(Path::new("code-insiders.BAT")));
         assert!(!is_windows_command_script(Path::new("code-insiders.exe")));
         assert!(!is_windows_command_script(Path::new("code-insiders")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn appends_windows_extensions_without_corrupting_unicode_paths() {
+        let path = append_windows_extension(
+            PathBuf::from(r"C:\ユーザー\Visual Studio Code\bin\code"),
+            OsStr::new(".cmd"),
+        );
+
+        assert_eq!(
+            path,
+            PathBuf::from(r"C:\ユーザー\Visual Studio Code\bin\code.cmd")
+        );
     }
 
     #[cfg(windows)]
