@@ -349,7 +349,7 @@ pub struct McpStartArgs {
 pub struct McpInstallArgs {
     #[arg(
         value_enum,
-        value_name = "vscode|copilot-cli|claude-code",
+        value_name = "vscode|vscode-insiders|copilot-cli|claude-code",
         hide_possible_values = true,
         help = "Agentic development system to configure"
     )]
@@ -362,6 +362,8 @@ pub struct McpInstallArgs {
 pub enum McpSystem {
     #[value(name = "vscode")]
     VsCode,
+    #[value(name = "vscode-insiders")]
+    VsCodeInsiders,
     #[value(name = "copilot-cli")]
     CopilotCli,
     #[value(name = "claude-code")]

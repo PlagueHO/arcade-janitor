@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added a VitePress documentation website with installation, CLI, MCP server, and development guides.
+- Added VS Code Insiders as an `mcp install` target using the `code-insiders` CLI.
 
 ### Changed
 
