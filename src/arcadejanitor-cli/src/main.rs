@@ -188,7 +188,11 @@ fn mcp_server_executable() -> Result<PathBuf> {
 fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()> {
     let mcp_executable = mcp_server_executable()?;
     let server_arguments = mcp_server_arguments(&args.rom_dir, source);
-    let command = mcp_install_command(args.system, &mcp_executable, &server_arguments)?;
+    let command = resolve_install_command(mcp_install_command(
+        args.system,
+        &mcp_executable,
+        &server_arguments,
+    )?)?;
     let status = Command::new(&command.program)
         .args(&command.arguments)
         .status()
@@ -241,6 +245,80 @@ fn mcp_source_arguments(source: &SourceOptions) -> Vec<OsString> {
 struct InstallCommand {
     program: OsString,
     arguments: Vec<OsString>,
+}
+
+fn resolve_install_command(command: InstallCommand) -> Result<InstallCommand> {
+    #[cfg(windows)]
+    {
+        resolve_windows_install_command(command)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(command)
+    }
+}
+
+#[cfg(windows)]
+fn resolve_windows_install_command(command: InstallCommand) -> Result<InstallCommand> {
+    let requested_program = command.program.to_string_lossy();
+    let output = Command::new("where.exe")
+        .arg(requested_program.as_ref())
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to resolve {} on PATH while installing the MCP server",
+                command.program.display()
+            )
+        })?;
+    if !output.status.success() {
+        bail!(
+            "{} was not found on PATH while installing the MCP server; ensure it is installed and available on PATH",
+            command.program.display()
+        );
+    }
+
+    let resolved_path = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .with_context(|| {
+            format!(
+                "Windows PATH resolution returned no usable path for {}",
+                command.program.display()
+            )
+        })?;
+    if is_windows_command_script(&resolved_path) {
+        Ok(wrap_windows_script_command(resolved_path, command))
+    } else {
+        Ok(InstallCommand {
+            program: resolved_path.into_os_string(),
+            arguments: command.arguments,
+        })
+    }
+}
+
+#[cfg(windows)]
+fn wrap_windows_script_command(path: PathBuf, command: InstallCommand) -> InstallCommand {
+    let mut arguments = vec![
+        OsString::from("/D"),
+        OsString::from("/C"),
+        path.into_os_string(),
+    ];
+    arguments.extend(command.arguments);
+    InstallCommand {
+        program: std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe")),
+        arguments,
+    }
+}
+
+#[cfg(windows)]
+fn is_windows_command_script(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+        })
 }
 
 fn mcp_install_command(
@@ -1515,6 +1593,45 @@ mod tests {
             .into_iter()
             .map(OsString::from)
             .collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn identifies_windows_command_script_launchers_case_insensitively() {
+        assert!(is_windows_command_script(Path::new("code-insiders.cmd")));
+        assert!(is_windows_command_script(Path::new("code-insiders.BAT")));
+        assert!(!is_windows_command_script(Path::new("code-insiders.exe")));
+        assert!(!is_windows_command_script(Path::new("code-insiders")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wraps_windows_command_scripts_with_comspec_without_losing_arguments() {
+        let command = wrap_windows_script_command(
+            PathBuf::from(r"C:\Program Files\Microsoft VS Code\bin\code.cmd"),
+            InstallCommand {
+                program: OsString::from("code"),
+                arguments: vec![
+                    OsString::from("--add-mcp"),
+                    OsString::from(r#"{"name":"arcadejanitor"}"#),
+                ],
+            },
+        );
+
+        assert_eq!(
+            command.program,
+            std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe"))
+        );
+        assert_eq!(
+            command.arguments,
+            vec![
+                OsString::from("/D"),
+                OsString::from("/C"),
+                OsString::from(r"C:\Program Files\Microsoft VS Code\bin\code.cmd"),
+                OsString::from("--add-mcp"),
+                OsString::from(r#"{"name":"arcadejanitor"}"#),
+            ]
         );
     }
 }
