@@ -30,8 +30,8 @@ The HTTP server listens at `http://127.0.0.1:3000` by default. Set
 - `GET /ws`
 
 Set `ARCADEJANITOR_MCP_TOKEN` to enable destructive tools such as moving and
-deleting ROMs. HTTP clients must send that token through a standard HTTP
-authorization header.
+deleting ROMs. HTTP clients must send the token as
+`Authorization: Bearer <token>`.
 
 ## Install a stdio server
 
@@ -92,7 +92,7 @@ started HTTP server, register the `/mcp` endpoint and token header:
 
 ```bash
 copilot mcp add --transport http \
-  --header "Authorization: ******" \
+  --header "Authorization: Bearer <token>" \
   arcadejanitor http://127.0.0.1:3000/mcp
 ```
 
