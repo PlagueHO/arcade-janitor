@@ -284,7 +284,7 @@ fn resolve_windows_program(program: &OsStr) -> Result<PathBuf> {
             .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
             .split(';')
             .filter(|extension| !extension.is_empty())
-            .map(|extension| OsString::from(extension.trim_start_matches('.')))
+            .map(|extension| OsString::from(extension.trim().trim_start_matches('.')))
             .collect()
     };
 
@@ -1673,7 +1673,7 @@ mod tests {
         // the process environment before returning.
         unsafe {
             std::env::set_var("PATH", directory.path());
-            std::env::set_var("PATHEXT", ".cmd");
+            std::env::set_var("PATHEXT", ".com; .cmd");
         }
         let resolved = resolve_windows_program(OsStr::new("code-insiders")).unwrap();
         unsafe {
