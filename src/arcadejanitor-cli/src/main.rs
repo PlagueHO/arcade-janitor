@@ -1657,6 +1657,19 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn resolves_unicode_command_script_paths_with_pathext() {
+        let directory = tempfile::tempdir().unwrap();
+        let launcher = directory.path().join("コード.cmd");
+        std::fs::write(&launcher, b"@echo off").unwrap();
+        let program = launcher.with_extension("");
+
+        let resolved = resolve_windows_program(program.as_os_str()).unwrap();
+
+        assert_eq!(resolved, launcher);
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn wraps_windows_command_scripts_with_comspec_without_losing_arguments() {
         let command = wrap_windows_script_command(
             PathBuf::from(r"C:\Program Files\Microsoft VS Code\bin\code.cmd"),
