@@ -197,7 +197,7 @@ fn only_rom_directories_are_positional_arguments() {
             .get_output()
             .stdout
             .clone();
-        let help = String::from_utf8(help).unwrap();
+        let help = String::from_utf8(help).unwrap().replace("\r\n", "\n");
 
         assert!(
             help.contains(required_option),

@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed stdio MCP installs so missing ROM arguments fail fast instead of generating
+  invalid server commands.
+- Fixed the VS Code build tasks to default to `cargo` while retaining Windows-only
+  PowerShell wrapper execution.
 - Fixed cross-platform CI validation for CLI argument tests.
 - Fixed Windows MCP installation through `.cmd` launchers when the launcher path
   contains spaces.

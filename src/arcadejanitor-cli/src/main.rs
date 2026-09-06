@@ -200,26 +200,28 @@ fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()
     if args.transport == McpTransport::Stdio && args.url.is_some() {
         bail!("--url is only valid with --transport http");
     }
-    let server_arguments = match args.transport {
+
+    let rom_dir = match args.transport {
         McpTransport::Stdio => {
-            let rom_dir = args
-                .rom_dir
-                .as_deref()
-                .context("ROM_DIR is required when installing with --transport stdio")?;
             if args.start_now {
                 bail!("--start-now is only valid with --transport http");
             }
-            Some(mcp_server_arguments(McpTransport::Stdio, rom_dir, source))
+            Some(
+                args.rom_dir
+                    .as_deref()
+                    .context("ROM_DIR is required when installing with --transport stdio")?,
+            )
         }
-        McpTransport::Http if args.start_now => Some(mcp_server_arguments(
-            McpTransport::Http,
+        McpTransport::Http if args.start_now => Some(
             args.rom_dir
                 .as_deref()
                 .context("ROM_DIR is required when using --start-now")?,
-            source,
-        )),
+        ),
         McpTransport::Http => None,
     };
+
+    let server_arguments =
+        rom_dir.map(|rom_dir| mcp_server_arguments(args.transport, rom_dir, source));
     let mcp_executable = mcp_server_executable()?;
     let url = args.url.as_deref().unwrap_or(DEFAULT_MCP_HTTP_URL);
     let command = mcp_install_command(
@@ -258,10 +260,7 @@ fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()
         );
     }
     if args.start_now {
-        let rom_dir = args
-            .rom_dir
-            .as_deref()
-            .context("ROM_DIR is required when using --start-now")?;
+        let rom_dir = rom_dir.context("ROM_DIR is required when using --start-now")?;
         start_mcp_server_now(rom_dir, source, &mcp_executable, url)?;
     }
     Ok(())
@@ -416,6 +415,8 @@ fn append_windows_extension(mut path: PathBuf, extension: &OsStr) -> PathBuf {
 
 #[cfg(windows)]
 fn wrap_windows_script_command(path: PathBuf, command: InstallCommand) -> InstallCommand {
+    // `cmd.exe /C` consumes a single quoted payload, while the script path itself must
+    // also be quoted to preserve spaces in the path and any appended arguments.
     let mut command_line = OsString::from("\"");
     command_line.push(quote_windows_command_argument(path.as_os_str()));
     for argument in command.arguments {
@@ -474,6 +475,10 @@ fn mcp_install_command(
     server_arguments: Option<&[OsString]>,
     url: &str,
 ) -> Result<InstallCommand> {
+    if transport == McpTransport::Stdio && server_arguments.is_none() {
+        bail!("server arguments are required when installing with --transport stdio");
+    }
+
     let server_command = mcp_executable
         .to_str()
         .context("MCP server executable path is not valid Unicode")?;

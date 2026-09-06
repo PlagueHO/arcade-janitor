@@ -26,16 +26,20 @@
     {
       "label": "Build: Workspace",
       "type": "shell",
-      "command": "powershell",
-      "args": [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1",
-        "build",
-        "--workspace"
-      ],
+      "command": "cargo",
+      "args": ["build", "--workspace"],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1",
+          "build",
+          "--workspace"
+        ]
+      },
       "group": "build",
       "problemMatcher": "$rustc",
       "icon": {
@@ -70,8 +74,21 @@
     {
       "label": "Build: arcadejanitor-mcp",
       "type": "shell",
-      "command": "powershell",
-      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1", "build", "-p", "arcadejanitor-mcp"],
+      "command": "cargo",
+      "args": ["build", "-p", "arcadejanitor-mcp"],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1",
+          "build",
+          "-p",
+          "arcadejanitor-mcp"
+        ]
+      },
       "group": "build",
       "problemMatcher": "$rustc",
       "icon": {
