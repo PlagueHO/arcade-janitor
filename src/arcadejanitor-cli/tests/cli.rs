@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use assert_cmd::{cargo::cargo_bin, Command};
+use assert_cmd::{Command, cargo::cargo_bin};
 use predicates::prelude::*;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -172,8 +172,7 @@ fn mcp_install_help_displays_supported_systems() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Usage: arcadejanitor.exe mcp install [OPTIONS] --system \
-             <vscode|vscode-insiders|copilot-cli|claude-code> [ROM_DIR]",
+            "--system <vscode|vscode-insiders|copilot-cli|claude-code> [ROM_DIR]",
         ));
 }
 

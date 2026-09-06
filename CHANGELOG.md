@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed cross-platform CI validation for CLI argument tests.
 - Fixed Windows MCP installation through `.cmd` launchers when the launcher path
   contains spaces.
 - Fixed the Windows workspace build task by initializing the Visual C++ environment
