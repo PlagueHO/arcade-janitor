@@ -200,35 +200,32 @@ fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()
     if args.transport == McpTransport::Stdio && args.url.is_some() {
         bail!("--url is only valid with --transport http");
     }
-    if args.transport == McpTransport::Stdio && args.start_now {
-        bail!("--start-now is only valid with --transport http");
-    }
     if args.transport == McpTransport::Stdio && args.rom_dir.is_none() {
         bail!("ROM_DIR is required when installing with --transport stdio");
+    }
+    if args.transport == McpTransport::Stdio && args.start_now {
+        bail!("--start-now is only valid with --transport http");
     }
     if args.start_now && args.rom_dir.is_none() {
         bail!("ROM_DIR is required when using --start-now");
     }
 
-    let server_arguments = match (args.transport, args.start_now) {
-        (McpTransport::Stdio, false) => Some(mcp_server_arguments(
+    let server_arguments = match args.transport {
+        McpTransport::Stdio => Some(mcp_server_arguments(
             McpTransport::Stdio,
             args.rom_dir
                 .as_deref()
                 .context("ROM_DIR is required when installing with --transport stdio")?,
             source,
         )),
-        (McpTransport::Http, true) => Some(mcp_server_arguments(
+        McpTransport::Http if args.start_now => Some(mcp_server_arguments(
             McpTransport::Http,
             args.rom_dir
                 .as_deref()
                 .context("ROM_DIR is required when using --start-now")?,
             source,
         )),
-        (McpTransport::Http, false) => None,
-        (McpTransport::Stdio, true) => {
-            bail!("--start-now is only valid with --transport http")
-        }
+        McpTransport::Http => None,
     };
     let mcp_executable = mcp_server_executable()?;
     let url = args.url.as_deref().unwrap_or(DEFAULT_MCP_HTTP_URL);

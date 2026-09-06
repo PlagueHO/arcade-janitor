@@ -252,6 +252,23 @@ fn mcp_install_validates_transport_specific_arguments() {
             "roms",
             "--transport",
             "stdio",
+            "--start-now",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--start-now is only valid with --transport http",
+        ));
+
+    command()
+        .args([
+            "mcp",
+            "install",
+            "--system",
+            "vscode",
+            "roms",
+            "--transport",
+            "stdio",
             "--url",
             "http://localhost:3000/mcp",
         ])
