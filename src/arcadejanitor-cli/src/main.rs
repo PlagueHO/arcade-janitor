@@ -1749,6 +1749,7 @@ mod tests {
                     OsString::from("--add-mcp"),
                     OsString::from(r#"{"name":"arcadejanitor"}"#),
                 ],
+                #[cfg(windows)]
                 raw_argument: None,
             },
         );
