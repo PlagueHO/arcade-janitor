@@ -1774,4 +1774,31 @@ mod tests {
             ))
         );
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn quotes_windows_arguments_with_trailing_backslashes() {
+        assert_eq!(
+            quote_windows_command_argument(OsStr::new(r"C:\path\")),
+            OsString::from(r#""C:\path\\""#)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn quotes_windows_arguments_with_backslashes_before_quotes() {
+        assert_eq!(
+            quote_windows_command_argument(OsStr::new(r#"a\"b"#)),
+            OsString::from(r#""a\\\"b""#)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn quotes_windows_arguments_with_unicode_and_quotes() {
+        assert_eq!(
+            quote_windows_command_argument(OsStr::new(r#"ユニコード"引用"#)),
+            OsString::from(r#""ユニコード\"引用""#)
+        );
+    }
 }
