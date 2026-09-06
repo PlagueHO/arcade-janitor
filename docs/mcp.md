@@ -49,6 +49,30 @@ The target client command (`code`, `code-insiders`, `copilot`, or `claude`) must
 be available on `PATH`. Re-running the command replaces only the existing
 `arcadejanitor` server entry for that client.
 
+## Install an HTTP server
+
+Use `--transport http` to register an HTTP MCP endpoint. HTTP installation does
+not require a local ROM folder, so it can register a server running on another
+machine:
+
+```bash
+./arcadejanitor mcp install vscode --transport http \
+  --url http://arcade-cabinet:3000/mcp
+```
+
+The HTTP server must be started separately on the machine containing the ROMs.
+For a local server, provide its ROM folder and use `--start-now` to start it
+after installation:
+
+```bash
+./arcadejanitor mcp install vscode ./roms --transport http --start-now
+```
+
+`--start-now` is only valid with HTTP transport. The server listens on
+`http://127.0.0.1:3000` by default; set `ARCADEJANITOR_MCP_ADDR` before starting
+the server when using another address, and set `--url` to the matching `/mcp`
+endpoint.
+
 ## VS Code configuration
 
 Create `.vscode/mcp.json` in a workspace, or use **MCP: Open User

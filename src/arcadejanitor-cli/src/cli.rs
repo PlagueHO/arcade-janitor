@@ -354,8 +354,29 @@ pub struct McpInstallArgs {
         help = "Agentic development system to configure"
     )]
     pub system: McpSystem,
-    #[arg(value_name = "ROM_DIR", help = "Directory containing ROM archives")]
-    pub rom_dir: PathBuf,
+    #[arg(
+        value_name = "ROM_DIR",
+        help = "Directory containing ROM archives (required for stdio and --start-now)"
+    )]
+    pub rom_dir: Option<PathBuf>,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = McpTransport::Stdio,
+        help = "MCP transport to register"
+    )]
+    pub transport: McpTransport,
+    #[arg(
+        long,
+        value_name = "URL",
+        help = "HTTP MCP endpoint (used with --transport http)"
+    )]
+    pub url: Option<String>,
+    #[arg(
+        long,
+        help = "Start the HTTP MCP server after installation (requires ROM_DIR)"
+    )]
+    pub start_now: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -368,6 +389,13 @@ pub enum McpSystem {
     CopilotCli,
     #[value(name = "claude-code")]
     ClaudeCode,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
+pub enum McpTransport {
+    #[default]
+    Stdio,
+    Http,
 }
 
 #[derive(Args, Debug)]

@@ -172,7 +172,50 @@ fn mcp_install_help_displays_supported_systems() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "<vscode|vscode-insiders|copilot-cli|claude-code> <ROM_DIR>",
+            "<vscode|vscode-insiders|copilot-cli|claude-code> [ROM_DIR]",
+        ));
+}
+
+#[test]
+fn mcp_install_validates_transport_specific_arguments() {
+    command()
+        .args(["mcp", "install", "vscode", "--transport", "stdio"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "ROM_DIR is required when installing with --transport stdio",
+        ));
+
+    command()
+        .args([
+            "mcp",
+            "install",
+            "vscode",
+            "--transport",
+            "http",
+            "--start-now",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "ROM_DIR is required when using --start-now",
+        ));
+
+    command()
+        .args([
+            "mcp",
+            "install",
+            "vscode",
+            "roms",
+            "--transport",
+            "stdio",
+            "--url",
+            "http://localhost:3000/mcp",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--url is only valid with --transport http",
         ));
 }
 

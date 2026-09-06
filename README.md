@@ -146,8 +146,9 @@ The CLI can start the packaged MCP server with the same metadata source options:
 
 ### Install in an agentic development system
 
-Use `arcadejanitor mcp install <system> <rom-folder>` to install the packaged MCP server as a
-user-scoped stdio server. The supported systems are `vscode`, `copilot-cli`, and `claude-code`.
+Use `arcadejanitor mcp install <system> [rom-folder]` to install the packaged MCP server as a
+user-scoped stdio or HTTP server. The supported systems are `vscode`, `copilot-cli`, and
+`claude-code`.
 Installation replaces the existing `arcadejanitor` server entry for that system without changing
 other configured servers.
 
@@ -156,6 +157,10 @@ other configured servers.
 ./arcadejanitor mcp install copilot-cli ./roms --mame-executable /path/to/mame
 ./arcadejanitor mcp install claude-code ./roms
 ```
+
+Install an HTTP server, including one hosted on another machine, with
+`--transport http --url http://host:3000/mcp`. HTTP installs require the server to be started
+manually; add `--start-now` and a local ROM folder to start it automatically after installation.
 
 The command uses each system's native user-scope registration interface: VS Code's active user
 profile, GitHub Copilot CLI's `~/.copilot/mcp-config.json`, and Claude Code's user-scoped

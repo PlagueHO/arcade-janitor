@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added HTTP and stdio transport selection to `mcp install`, including optional
+  automatic startup for locally hosted HTTP MCP servers.
 - Added a VitePress documentation website with installation, CLI, MCP server, and development guides.
 - Added VS Code Insiders as an `mcp install` target using the `code-insiders` CLI.
 - Added contributor guidance, shared VS Code Rust quality settings, and formatting
@@ -30,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the Windows workspace build task by initializing the Visual C++ environment
+  required by native Rust dependencies.
 - Fixed Windows command-script MCP installation by avoiding duplicate quoting
   when invoking launchers through `cmd.exe`.
 - Fixed non-Windows builds after adding Windows MCP client installation support.

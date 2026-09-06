@@ -26,8 +26,16 @@
     {
       "label": "Build: Workspace",
       "type": "shell",
-      "command": "cargo",
-      "args": ["build", "--workspace"],
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\Invoke-Cargo.ps1",
+        "build",
+        "--workspace"
+      ],
       "group": "build",
       "problemMatcher": "$rustc",
       "icon": {
