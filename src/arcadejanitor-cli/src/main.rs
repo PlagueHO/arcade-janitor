@@ -424,6 +424,7 @@ fn mcp_install_command(
                     OsString::from("--add-mcp"),
                     OsString::from(serde_json::to_string(&configuration)?),
                 ],
+                #[cfg(windows)]
                 raw_argument: None,
             })
         }
@@ -441,6 +442,7 @@ fn mcp_install_command(
             Ok(InstallCommand {
                 program: OsString::from("copilot"),
                 arguments,
+                #[cfg(windows)]
                 raw_argument: None,
             })
         }
@@ -460,6 +462,7 @@ fn mcp_install_command(
             Ok(InstallCommand {
                 program: OsString::from("claude"),
                 arguments,
+                #[cfg(windows)]
                 raw_argument: None,
             })
         }
