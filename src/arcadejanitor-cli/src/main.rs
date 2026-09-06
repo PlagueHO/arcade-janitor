@@ -278,6 +278,7 @@ fn resolve_windows_install_command(command: InstallCommand) -> Result<InstallCom
         Ok(InstallCommand {
             program: resolved_path.into_os_string(),
             arguments: command.arguments,
+            #[cfg(windows)]
             raw_argument: None,
         })
     }
