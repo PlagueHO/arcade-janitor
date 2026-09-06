@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed Windows command-script MCP installation by avoiding duplicate quoting
+  when invoking launchers through `cmd.exe`.
 - Fixed non-Windows builds after adding Windows MCP client installation support.
 - Fixed VS Code MCP installation on Windows when the client launcher is installed
   under a path containing spaces.
