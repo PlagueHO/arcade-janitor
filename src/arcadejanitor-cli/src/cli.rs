@@ -176,7 +176,7 @@ pub struct RomListArgs {
 pub struct RomShowArgs {
     #[arg(value_name = "ROM_DIR", help = "Directory containing ROM archives")]
     pub rom_dir: PathBuf,
-    #[arg(value_name = "NAME", help = "Exact ROM name")]
+    #[arg(long, value_name = "NAME", help = "Exact ROM name")]
     pub name: String,
 }
 
@@ -185,6 +185,7 @@ pub struct RomMoveArgs {
     #[arg(value_name = "ROM_DIR", help = "Directory containing ROM archives")]
     pub rom_dir: PathBuf,
     #[arg(
+        long,
         value_name = "DESTINATION",
         help = "Directory to move selected archives into"
     )]
@@ -277,7 +278,7 @@ pub struct CatalogListArgs {
 
 #[derive(Args, Debug)]
 pub struct CatalogShowArgs {
-    #[arg(value_name = "NAME", help = "Exact catalog entry name")]
+    #[arg(long, value_name = "NAME", help = "Exact catalog entry name")]
     pub name: String,
 }
 
@@ -303,7 +304,7 @@ pub struct CategoryListArgs {
 
 #[derive(Args, Debug)]
 pub struct CategoryShowArgs {
-    #[arg(value_name = "CATEGORY", help = "Exact category name")]
+    #[arg(long, value_name = "CATEGORY", help = "Exact category name")]
     pub category: String,
     #[arg(long, value_name = "TEXT", help = "Match subcategory names")]
     pub subcategory: Option<String>,
@@ -348,6 +349,7 @@ pub struct McpStartArgs {
 #[derive(Args, Debug)]
 pub struct McpInstallArgs {
     #[arg(
+        long,
         value_enum,
         value_name = "vscode|vscode-insiders|copilot-cli|claude-code",
         hide_possible_values = true,
@@ -400,13 +402,13 @@ pub enum McpTransport {
 
 #[derive(Args, Debug)]
 pub struct SourceTargetArgs {
-    #[arg(value_enum, default_value_t = SourceTarget::All)]
+    #[arg(long, value_enum, default_value_t = SourceTarget::All)]
     pub target: SourceTarget,
 }
 
 #[derive(Args, Debug)]
 pub struct SourceClearArgs {
-    #[arg(value_enum)]
+    #[arg(long, value_enum)]
     pub target: SourceTarget,
     #[arg(
         long,
@@ -424,7 +426,7 @@ pub enum SourceTarget {
 
 #[derive(Args, Debug)]
 pub struct CompletionsArgs {
-    #[arg(value_enum)]
+    #[arg(long, value_enum)]
     pub shell: Shell,
 }
 

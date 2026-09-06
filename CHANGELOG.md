@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Changed CLI data inputs to named options, leaving the ROM folder as the only
+  permitted positional argument.
+
 ### Added
 
 - Added HTTP and stdio transport selection to `mcp install`, including optional
@@ -32,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed Windows MCP installation through `.cmd` launchers when the launcher path
+  contains spaces.
 - Fixed the Windows workspace build task by initializing the Visual C++ environment
   required by native Rust dependencies.
 - Fixed Windows command-script MCP installation by avoiding duplicate quoting

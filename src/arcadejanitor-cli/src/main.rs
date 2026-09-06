@@ -426,11 +426,13 @@ fn append_windows_extension(mut path: PathBuf, extension: &OsStr) -> PathBuf {
 
 #[cfg(windows)]
 fn wrap_windows_script_command(path: PathBuf, command: InstallCommand) -> InstallCommand {
-    let mut command_line = quote_windows_command_argument(path.as_os_str());
+    let mut command_line = OsString::from("\"");
+    command_line.push(quote_windows_command_argument(path.as_os_str()));
     for argument in command.arguments {
         command_line.push(" ");
         command_line.push(quote_windows_command_argument(&argument));
     }
+    command_line.push("\"");
 
     InstallCommand {
         program: std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe")),
@@ -1973,7 +1975,7 @@ mod tests {
         assert_eq!(
             command.raw_argument,
             Some(OsString::from(
-                r#""C:\Program Files\Microsoft VS Code\bin\code.cmd" "--add-mcp" "{\"name\":\"arcadejanitor\"}""#,
+                r#"""C:\Program Files\Microsoft VS Code\bin\code.cmd" "--add-mcp" "{\"name\":\"arcadejanitor\"}"""#,
             ))
         );
     }

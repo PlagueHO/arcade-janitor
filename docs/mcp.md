@@ -39,10 +39,10 @@ The CLI can register a user-scoped stdio server for VS Code, GitHub Copilot CLI,
 or Claude Code:
 
 ```bash
-./arcadejanitor mcp install vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
-./arcadejanitor mcp install vscode-insiders ./roms --mame-xml ./mame.xml --catver ./catver.ini
-./arcadejanitor mcp install copilot-cli ./roms --mame-executable /path/to/mame
-./arcadejanitor mcp install claude-code ./roms
+./arcadejanitor mcp install --system vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor mcp install --system vscode-insiders ./roms --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor mcp install --system copilot-cli ./roms --mame-executable /path/to/mame
+./arcadejanitor mcp install --system claude-code ./roms
 ```
 
 The target client command (`code`, `code-insiders`, `copilot`, or `claude`) must
@@ -56,7 +56,7 @@ not require a local ROM folder, so it can register a server running on another
 machine:
 
 ```bash
-./arcadejanitor mcp install vscode --transport http \
+./arcadejanitor mcp install --system vscode --transport http \
   --url http://arcade-cabinet:3000/mcp
 ```
 
@@ -65,7 +65,7 @@ For a local server, provide its ROM folder and use `--start-now` to start it
 after installation:
 
 ```bash
-./arcadejanitor mcp install vscode ./roms --transport http --start-now
+./arcadejanitor mcp install --system vscode ./roms --transport http --start-now
 ```
 
 `--start-now` is only valid with HTTP transport. The server listens on

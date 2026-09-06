@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use assert_cmd::{Command, cargo::cargo_bin};
+use assert_cmd::{cargo::cargo_bin, Command};
 use predicates::prelude::*;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -172,14 +172,56 @@ fn mcp_install_help_displays_supported_systems() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "<vscode|vscode-insiders|copilot-cli|claude-code> [ROM_DIR]",
+            "Usage: arcadejanitor.exe mcp install [OPTIONS] --system \
+             <vscode|vscode-insiders|copilot-cli|claude-code> [ROM_DIR]",
         ));
+}
+
+#[test]
+fn only_rom_directories_are_positional_arguments() {
+    for (arguments, required_option) in [
+        (&["rom", "show", "--help"][..], "--name <NAME>"),
+        (
+            &["rom", "move", "--help"][..],
+            "--destination <DESTINATION>",
+        ),
+        (&["catalog", "show", "--help"][..], "--name <NAME>"),
+        (&["category", "show", "--help"][..], "--category <CATEGORY>"),
+        (&["source", "refresh", "--help"][..], "--target <TARGET>"),
+        (&["source", "clear", "--help"][..], "--target <TARGET>"),
+        (&["completions", "--help"][..], "--shell <SHELL>"),
+    ] {
+        let help = command()
+            .args(arguments)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let help = String::from_utf8(help).unwrap();
+
+        assert!(
+            help.contains(required_option),
+            "missing named option {required_option} in {arguments:?}"
+        );
+        assert!(
+            !help.contains(&format!("Arguments:\n  {required_option}")),
+            "option is still positional in {arguments:?}"
+        );
+    }
 }
 
 #[test]
 fn mcp_install_validates_transport_specific_arguments() {
     command()
-        .args(["mcp", "install", "vscode", "--transport", "stdio"])
+        .args([
+            "mcp",
+            "install",
+            "--system",
+            "vscode",
+            "--transport",
+            "stdio",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -190,6 +232,7 @@ fn mcp_install_validates_transport_specific_arguments() {
         .args([
             "mcp",
             "install",
+            "--system",
             "vscode",
             "--transport",
             "http",
@@ -205,6 +248,7 @@ fn mcp_install_validates_transport_specific_arguments() {
         .args([
             "mcp",
             "install",
+            "--system",
             "vscode",
             "roms",
             "--transport",
@@ -234,6 +278,7 @@ fn global_source_and_output_options_work_after_subcommands() {
     let mut arguments = vec![
         "catalog".to_string(),
         "show".to_string(),
+        "--name".to_string(),
         "pacman".to_string(),
     ];
     arguments.extend(source_args(directory.path()));
@@ -397,6 +442,7 @@ fn mutations_require_selection_and_preview_by_default() {
         "rom".to_string(),
         "move".to_string(),
         rom_dir.display().to_string(),
+        "--destination".to_string(),
         destination.display().to_string(),
     ];
     unqualified.extend(source_args(directory.path()));
@@ -463,6 +509,7 @@ fn mutation_executes_only_with_execute() {
         "rom".to_string(),
         "move".to_string(),
         rom_dir.display().to_string(),
+        "--destination".to_string(),
         destination.display().to_string(),
         "--name".to_string(),
         "pacman".to_string(),
@@ -488,6 +535,7 @@ fn tsv_output_is_header_controllable_and_status_stays_off_stdout() {
     let mut arguments = vec![
         "catalog".to_string(),
         "show".to_string(),
+        "--name".to_string(),
         "pacman".to_string(),
         "--output".to_string(),
         "tsv".to_string(),
@@ -522,6 +570,7 @@ fn category_commands_replace_raw_catver_views() {
     let mut show = vec![
         "category".to_string(),
         "show".to_string(),
+        "--category".to_string(),
         "Shooter".to_string(),
         "--subcategory".to_string(),
         "vertical".to_string(),
@@ -539,7 +588,7 @@ fn category_commands_replace_raw_catver_views() {
 #[test]
 fn completions_generates_a_shell_script() {
     command()
-        .args(["completions", "powershell"])
+        .args(["completions", "--shell", "powershell"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Register-ArgumentCompleter"));
@@ -548,7 +597,7 @@ fn completions_generates_a_shell_script() {
 #[test]
 fn source_clear_previews_by_default() {
     command()
-        .args(["source", "clear", "mame", "--output", "json"])
+        .args(["source", "clear", "--target", "mame", "--output", "json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""action": "clear""#))
