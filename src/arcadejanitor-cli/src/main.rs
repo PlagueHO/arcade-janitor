@@ -2,6 +2,10 @@ mod cli;
 
 #[cfg(windows)]
 use std::ffi::OsStr;
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -193,8 +197,13 @@ fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()
     let command = mcp_install_command(args.system, &mcp_executable, &server_arguments)?;
     let requested_program = command.program.clone();
     let command = resolve_install_command(command)?;
-    let status = Command::new(&command.program)
-        .args(&command.arguments)
+    let mut process = Command::new(&command.program);
+    process.args(&command.arguments);
+    #[cfg(windows)]
+    if let Some(raw_argument) = &command.raw_argument {
+        process.raw_arg(raw_argument);
+    }
+    let status = process
         .status()
         .with_context(|| {
             format!(
@@ -245,6 +254,8 @@ fn mcp_source_arguments(source: &SourceOptions) -> Vec<OsString> {
 struct InstallCommand {
     program: OsString,
     arguments: Vec<OsString>,
+    #[cfg(windows)]
+    raw_argument: Option<OsString>,
 }
 
 fn resolve_install_command(command: InstallCommand) -> Result<InstallCommand> {
@@ -267,6 +278,8 @@ fn resolve_windows_install_command(command: InstallCommand) -> Result<InstallCom
         Ok(InstallCommand {
             program: resolved_path.into_os_string(),
             arguments: command.arguments,
+            #[cfg(windows)]
+            raw_argument: None,
         })
     }
 }
@@ -331,16 +344,44 @@ fn append_windows_extension(mut path: PathBuf, extension: &OsStr) -> PathBuf {
 
 #[cfg(windows)]
 fn wrap_windows_script_command(path: PathBuf, command: InstallCommand) -> InstallCommand {
-    let mut arguments = vec![
-        OsString::from("/D"),
-        OsString::from("/C"),
-        path.into_os_string(),
-    ];
-    arguments.extend(command.arguments);
+    let mut command_line = quote_windows_command_argument(path.as_os_str());
+    for argument in command.arguments {
+        command_line.push(" ");
+        command_line.push(quote_windows_command_argument(&argument));
+    }
+
     InstallCommand {
         program: std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe")),
-        arguments,
+        arguments: vec![
+            OsString::from("/D"),
+            OsString::from("/S"),
+            OsString::from("/C"),
+        ],
+        raw_argument: Some(command_line),
     }
+}
+
+#[cfg(windows)]
+fn quote_windows_command_argument(argument: &OsStr) -> OsString {
+    let mut quoted = vec![u16::from(b'"')];
+    let mut backslashes = 0;
+
+    for character in argument.encode_wide() {
+        if character == u16::from(b'\\') {
+            backslashes += 1;
+        } else if character == u16::from(b'"') {
+            quoted.extend(std::iter::repeat_n(u16::from(b'\\'), backslashes * 2 + 1));
+            quoted.push(character);
+            backslashes = 0;
+        } else {
+            quoted.extend(std::iter::repeat_n(u16::from(b'\\'), backslashes));
+            quoted.push(character);
+            backslashes = 0;
+        }
+    }
+    quoted.extend(std::iter::repeat_n(u16::from(b'\\'), backslashes * 2));
+    quoted.push(u16::from(b'"'));
+    OsString::from_wide(&quoted)
 }
 
 #[cfg(windows)]
@@ -382,6 +423,8 @@ fn mcp_install_command(
                     OsString::from("--add-mcp"),
                     OsString::from(serde_json::to_string(&configuration)?),
                 ],
+                #[cfg(windows)]
+                raw_argument: None,
             })
         }
         McpSystem::CopilotCli => {
@@ -398,6 +441,8 @@ fn mcp_install_command(
             Ok(InstallCommand {
                 program: OsString::from("copilot"),
                 arguments,
+                #[cfg(windows)]
+                raw_argument: None,
             })
         }
         McpSystem::ClaudeCode => {
@@ -416,6 +461,8 @@ fn mcp_install_command(
             Ok(InstallCommand {
                 program: OsString::from("claude"),
                 arguments,
+                #[cfg(windows)]
+                raw_argument: None,
             })
         }
     }
@@ -1701,6 +1748,8 @@ mod tests {
                     OsString::from("--add-mcp"),
                     OsString::from(r#"{"name":"arcadejanitor"}"#),
                 ],
+                #[cfg(windows)]
+                raw_argument: None,
             },
         );
 
@@ -1712,11 +1761,42 @@ mod tests {
             command.arguments,
             vec![
                 OsString::from("/D"),
+                OsString::from("/S"),
                 OsString::from("/C"),
-                OsString::from(r"C:\Program Files\Microsoft VS Code\bin\code.cmd"),
-                OsString::from("--add-mcp"),
-                OsString::from(r#"{"name":"arcadejanitor"}"#),
             ]
+        );
+        assert_eq!(
+            command.raw_argument,
+            Some(OsString::from(
+                r#""C:\Program Files\Microsoft VS Code\bin\code.cmd" "--add-mcp" "{\"name\":\"arcadejanitor\"}""#,
+            ))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn quotes_windows_arguments_with_trailing_backslashes() {
+        assert_eq!(
+            quote_windows_command_argument(OsStr::new(r"C:\path\")),
+            OsString::from(r#""C:\path\\""#)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn quotes_windows_arguments_with_backslashes_before_quotes() {
+        assert_eq!(
+            quote_windows_command_argument(OsStr::new(r#"a\"b"#)),
+            OsString::from(r#""a\\\"b""#)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn quotes_windows_arguments_with_unicode_and_quotes() {
+        assert_eq!(
+            quote_windows_command_argument(OsStr::new(r#"ユニコード"引用"#)),
+            OsString::from("\"ユニコード\\\"引用\"")
         );
     }
 }
