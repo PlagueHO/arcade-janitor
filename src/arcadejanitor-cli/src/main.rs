@@ -39,9 +39,9 @@ use clap::{
 };
 use cli::{
     AuditLevel, CatalogCommands, CategoryCommands, Cli, ColorMode, Commands, McpCommands,
-    McpInstallArgs, McpStartArgs, McpSystem, OrderingArgs, OutputFormat, PresentationOptions,
-    RegionArg, RomCommands, RomStatus, SelectorArgs, SortField, SourceCommands, SourceOptions,
-    SourceTarget,
+    McpInstallArgs, McpStartArgs, McpSystem, McpTransport, OrderingArgs, OutputFormat,
+    PresentationOptions, RegionArg, RomCommands, RomStatus, SelectorArgs, SortField,
+    SourceCommands, SourceOptions, SourceTarget,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -61,6 +61,7 @@ const LOGO: &str = concat!(
     r"        \/            \/     \/      \/    \/                \/     \/",
     "\n\x1b[0m"
 );
+const DEFAULT_MCP_HTTP_URL: &str = "http://127.0.0.1:3000/mcp";
 
 fn main() -> Result<()> {
     let cli = Cli::from_arg_matches(&cli_command().get_matches())?;
@@ -172,7 +173,11 @@ fn run_mcp(command: McpCommands, source: &SourceOptions) -> Result<()> {
 fn start_mcp_server(args: McpStartArgs, source: &SourceOptions) -> Result<()> {
     let executable = mcp_server_executable()?;
     let mut command = Command::new(&executable);
-    command.arg("--rom-folder").arg(args.rom_dir);
+    command
+        .arg("--transport")
+        .arg("http")
+        .arg("--rom-folder")
+        .arg(args.rom_dir);
     command.args(mcp_source_arguments(source));
 
     let status = command
@@ -192,9 +197,40 @@ fn mcp_server_executable() -> Result<PathBuf> {
 }
 
 fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()> {
+    if args.transport == McpTransport::Stdio && args.url.is_some() {
+        bail!("--url is only valid with --transport http");
+    }
+
+    let rom_dir = match args.transport {
+        McpTransport::Stdio => {
+            if args.start_now {
+                bail!("--start-now is only valid with --transport http");
+            }
+            Some(
+                args.rom_dir
+                    .as_deref()
+                    .context("ROM_DIR is required when installing with --transport stdio")?,
+            )
+        }
+        McpTransport::Http if args.start_now => Some(
+            args.rom_dir
+                .as_deref()
+                .context("ROM_DIR is required when using --start-now")?,
+        ),
+        McpTransport::Http => None,
+    };
+
+    let server_arguments =
+        rom_dir.map(|rom_dir| mcp_server_arguments(args.transport, rom_dir, source));
     let mcp_executable = mcp_server_executable()?;
-    let server_arguments = mcp_server_arguments(&args.rom_dir, source);
-    let command = mcp_install_command(args.system, &mcp_executable, &server_arguments)?;
+    let url = args.url.as_deref().unwrap_or(DEFAULT_MCP_HTTP_URL);
+    let command = mcp_install_command(
+        args.system,
+        args.transport,
+        &mcp_executable,
+        server_arguments.as_deref(),
+        url,
+    )?;
     let requested_program = command.program.clone();
     let command = resolve_install_command(command)?;
     let mut process = Command::new(&command.program);
@@ -217,13 +253,48 @@ fn install_mcp_server(args: McpInstallArgs, source: &SourceOptions) -> Result<()
             Path::new(&requested_program).display()
         );
     }
+    if args.transport == McpTransport::Http && !args.start_now {
+        eprintln!(
+            "Warning: HTTP MCP server installation does not start the server. \
+             Run `arcadejanitor mcp start <ROM_DIR>` separately."
+        );
+    }
+    if args.start_now {
+        let rom_dir = rom_dir.context("ROM_DIR is required when using --start-now")?;
+        start_mcp_server_now(rom_dir, source, &mcp_executable, url)?;
+    }
     Ok(())
 }
 
-fn mcp_server_arguments(rom_dir: &Path, source: &SourceOptions) -> Vec<OsString> {
+fn start_mcp_server_now(
+    rom_dir: &Path,
+    source: &SourceOptions,
+    executable: &Path,
+    url: &str,
+) -> Result<()> {
+    Command::new(executable)
+        .arg("--transport")
+        .arg("http")
+        .arg("--rom-folder")
+        .arg(rom_dir)
+        .args(mcp_source_arguments(source))
+        .spawn()
+        .with_context(|| format!("failed to start MCP server at {}", executable.display()))?;
+    eprintln!("Started HTTP MCP server for {url}.");
+    Ok(())
+}
+
+fn mcp_server_arguments(
+    transport: McpTransport,
+    rom_dir: &Path,
+    source: &SourceOptions,
+) -> Vec<OsString> {
     let mut arguments = vec![
         OsString::from("--transport"),
-        OsString::from("stdio"),
+        OsString::from(match transport {
+            McpTransport::Stdio => "stdio",
+            McpTransport::Http => "http",
+        }),
         OsString::from("--rom-folder"),
         rom_dir.as_os_str().to_os_string(),
     ];
@@ -344,11 +415,15 @@ fn append_windows_extension(mut path: PathBuf, extension: &OsStr) -> PathBuf {
 
 #[cfg(windows)]
 fn wrap_windows_script_command(path: PathBuf, command: InstallCommand) -> InstallCommand {
-    let mut command_line = quote_windows_command_argument(path.as_os_str());
+    // `cmd.exe /C` consumes a single quoted payload, while the script path itself must
+    // also be quoted to preserve spaces in the path and any appended arguments.
+    let mut command_line = OsString::from("\"");
+    command_line.push(quote_windows_command_argument(path.as_os_str()));
     for argument in command.arguments {
         command_line.push(" ");
         command_line.push(quote_windows_command_argument(&argument));
     }
+    command_line.push("\"");
 
     InstallCommand {
         program: std::env::var_os("COMSPEC").unwrap_or_else(|| OsString::from("cmd.exe")),
@@ -395,24 +470,38 @@ fn is_windows_command_script(path: &Path) -> bool {
 
 fn mcp_install_command(
     system: McpSystem,
+    transport: McpTransport,
     mcp_executable: &Path,
-    server_arguments: &[OsString],
+    server_arguments: Option<&[OsString]>,
+    url: &str,
 ) -> Result<InstallCommand> {
+    if transport == McpTransport::Stdio && server_arguments.is_none() {
+        bail!("server arguments are required when installing with --transport stdio");
+    }
+
     let server_command = mcp_executable
         .to_str()
         .context("MCP server executable path is not valid Unicode")?;
     match system {
         McpSystem::VsCode | McpSystem::VsCodeInsiders => {
             let arguments = server_arguments
+                .unwrap_or_default()
                 .iter()
                 .map(|argument| argument.to_string_lossy().into_owned())
                 .collect::<Vec<_>>();
-            let configuration = json!({
-                "name": "arcadejanitor",
-                "type": "stdio",
-                "command": server_command,
-                "args": arguments,
-            });
+            let configuration = match transport {
+                McpTransport::Stdio => json!({
+                    "name": "arcadejanitor",
+                    "type": "stdio",
+                    "command": server_command,
+                    "args": arguments,
+                }),
+                McpTransport::Http => json!({
+                    "name": "arcadejanitor",
+                    "type": "http",
+                    "url": url,
+                }),
+            };
             Ok(InstallCommand {
                 program: OsString::from(match system {
                     McpSystem::VsCode => "code",
@@ -428,6 +517,21 @@ fn mcp_install_command(
             })
         }
         McpSystem::CopilotCli => {
+            if transport == McpTransport::Http {
+                return Ok(InstallCommand {
+                    program: OsString::from("copilot"),
+                    arguments: vec![
+                        "mcp".into(),
+                        "add".into(),
+                        "--transport".into(),
+                        "http".into(),
+                        "arcadejanitor".into(),
+                        url.into(),
+                    ],
+                    #[cfg(windows)]
+                    raw_argument: None,
+                });
+            }
             let mut arguments = vec![
                 OsString::from("mcp"),
                 OsString::from("add"),
@@ -437,7 +541,7 @@ fn mcp_install_command(
                 OsString::from("--"),
                 mcp_executable.as_os_str().to_os_string(),
             ];
-            arguments.extend_from_slice(server_arguments);
+            arguments.extend_from_slice(server_arguments.unwrap_or_default());
             Ok(InstallCommand {
                 program: OsString::from("copilot"),
                 arguments,
@@ -446,6 +550,23 @@ fn mcp_install_command(
             })
         }
         McpSystem::ClaudeCode => {
+            if transport == McpTransport::Http {
+                return Ok(InstallCommand {
+                    program: OsString::from("claude"),
+                    arguments: vec![
+                        "mcp".into(),
+                        "add".into(),
+                        "--scope".into(),
+                        "user".into(),
+                        "--transport".into(),
+                        "http".into(),
+                        "arcadejanitor".into(),
+                        url.into(),
+                    ],
+                    #[cfg(windows)]
+                    raw_argument: None,
+                });
+            }
             let mut arguments = vec![
                 OsString::from("mcp"),
                 OsString::from("add"),
@@ -457,7 +578,7 @@ fn mcp_install_command(
                 OsString::from("--"),
                 mcp_executable.as_os_str().to_os_string(),
             ];
-            arguments.extend_from_slice(server_arguments);
+            arguments.extend_from_slice(server_arguments.unwrap_or_default());
             Ok(InstallCommand {
                 program: OsString::from("claude"),
                 arguments,
@@ -1583,10 +1704,18 @@ mod tests {
             catver: Some(PathBuf::from("catver.ini")),
             ..Default::default()
         };
-        let server_arguments = mcp_server_arguments(Path::new("roms"), &source);
+        let server_arguments =
+            mcp_server_arguments(McpTransport::Stdio, Path::new("roms"), &source);
         let executable = Path::new("arcadejanitor-mcp");
 
-        let vscode = mcp_install_command(McpSystem::VsCode, executable, &server_arguments).unwrap();
+        let vscode = mcp_install_command(
+            McpSystem::VsCode,
+            McpTransport::Stdio,
+            executable,
+            Some(&server_arguments),
+            "http://127.0.0.1:3000/mcp",
+        )
+        .unwrap();
         assert_eq!(vscode.program, OsString::from("code"));
         assert_eq!(vscode.arguments[0], OsString::from("--add-mcp"));
         let configuration: serde_json::Value =
@@ -1608,13 +1737,25 @@ mod tests {
             ])
         );
 
-        let vscode_insiders =
-            mcp_install_command(McpSystem::VsCodeInsiders, executable, &server_arguments).unwrap();
+        let vscode_insiders = mcp_install_command(
+            McpSystem::VsCodeInsiders,
+            McpTransport::Stdio,
+            executable,
+            Some(&server_arguments),
+            "http://127.0.0.1:3000/mcp",
+        )
+        .unwrap();
         assert_eq!(vscode_insiders.program, OsString::from("code-insiders"));
         assert_eq!(vscode_insiders.arguments, vscode.arguments);
 
-        let copilot =
-            mcp_install_command(McpSystem::CopilotCli, executable, &server_arguments).unwrap();
+        let copilot = mcp_install_command(
+            McpSystem::CopilotCli,
+            McpTransport::Stdio,
+            executable,
+            Some(&server_arguments),
+            "http://127.0.0.1:3000/mcp",
+        )
+        .unwrap();
         assert_eq!(copilot.program, OsString::from("copilot"));
         assert_eq!(
             copilot.arguments,
@@ -1640,8 +1781,14 @@ mod tests {
             .collect::<Vec<_>>()
         );
 
-        let claude =
-            mcp_install_command(McpSystem::ClaudeCode, executable, &server_arguments).unwrap();
+        let claude = mcp_install_command(
+            McpSystem::ClaudeCode,
+            McpTransport::Stdio,
+            executable,
+            Some(&server_arguments),
+            "http://127.0.0.1:3000/mcp",
+        )
+        .unwrap();
         assert_eq!(claude.program, OsString::from("claude"));
         assert_eq!(
             &claude.arguments[..7],
@@ -1658,6 +1805,61 @@ mod tests {
     }
 
     #[test]
+    fn builds_http_install_commands_with_endpoint_configuration() {
+        let executable = Path::new("arcadejanitor-mcp");
+        let url = "http://arcade-cabinet:3000/mcp";
+
+        let vscode =
+            mcp_install_command(McpSystem::VsCode, McpTransport::Http, executable, None, url)
+                .unwrap();
+        let configuration: serde_json::Value =
+            serde_json::from_str(&vscode.arguments[1].to_string_lossy()).unwrap();
+        assert_eq!(configuration["type"], "http");
+        assert_eq!(configuration["url"], url);
+
+        let copilot = mcp_install_command(
+            McpSystem::CopilotCli,
+            McpTransport::Http,
+            executable,
+            None,
+            url,
+        )
+        .unwrap();
+        assert_eq!(
+            copilot.arguments,
+            vec!["mcp", "add", "--transport", "http", "arcadejanitor", url,]
+                .into_iter()
+                .map(OsString::from)
+                .collect::<Vec<_>>()
+        );
+
+        let claude = mcp_install_command(
+            McpSystem::ClaudeCode,
+            McpTransport::Http,
+            executable,
+            None,
+            url,
+        )
+        .unwrap();
+        assert_eq!(
+            claude.arguments,
+            vec![
+                "mcp",
+                "add",
+                "--scope",
+                "user",
+                "--transport",
+                "http",
+                "arcadejanitor",
+                url,
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn forwards_the_mame_executable_to_installed_servers() {
         let source = SourceOptions {
             mame_executable: Some(PathBuf::from("mame")),
@@ -1665,7 +1867,7 @@ mod tests {
         };
 
         assert_eq!(
-            mcp_server_arguments(Path::new("roms"), &source),
+            mcp_server_arguments(McpTransport::Stdio, Path::new("roms"), &source),
             vec![
                 "--transport",
                 "stdio",
@@ -1768,7 +1970,7 @@ mod tests {
         assert_eq!(
             command.raw_argument,
             Some(OsString::from(
-                r#""C:\Program Files\Microsoft VS Code\bin\code.cmd" "--add-mcp" "{\"name\":\"arcadejanitor\"}""#,
+                r#"""C:\Program Files\Microsoft VS Code\bin\code.cmd" "--add-mcp" "{\"name\":\"arcadejanitor\"}"""#,
             ))
         );
     }

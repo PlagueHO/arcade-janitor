@@ -87,12 +87,12 @@ Use `arcadejanitor <resource> --help` and
 
 ```bash
 ./arcadejanitor rom list ./roms --genre maze --mame-xml ./mame.xml --catver ./catver.ini
-./arcadejanitor rom show ./roms pacman --mame-xml ./mame.xml --catver ./catver.ini
-./arcadejanitor catalog show pacman --mame-xml ./mame.xml --catver ./catver.ini --output json
+./arcadejanitor rom show ./roms --name pacman --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor catalog show --name pacman --mame-xml ./mame.xml --catver ./catver.ini --output json
 ./arcadejanitor catalog list --manufacturer Namco --year 1980..1985 --mame-xml ./mame.xml
-./arcadejanitor category show Shooter --subcategory vertical --mame-xml ./mame.xml
-./arcadejanitor rom move ./roms ./filtered --genre maze --mame-xml ./mame.xml
-./arcadejanitor rom move ./roms ./filtered --genre maze --execute --mame-xml ./mame.xml
+./arcadejanitor category show --category Shooter --subcategory vertical --mame-xml ./mame.xml
+./arcadejanitor rom move ./roms --destination ./filtered --genre maze --mame-xml ./mame.xml
+./arcadejanitor rom move ./roms --destination ./filtered --genre maze --execute --mame-xml ./mame.xml
 ./arcadejanitor rom delete ./roms --name "prototype*" --execute --mame-xml ./mame.xml
 ./arcadejanitor rom stats ./roms --output json --mame-xml ./mame.xml
 ./arcadejanitor rom stats ./roms --category Shooter --subcategory "Flying Vertical" --show-missing --output json --mame-xml ./mame.xml
@@ -100,8 +100,8 @@ Use `arcadejanitor <resource> --help` and
 ./arcadejanitor rom audit ./roms --mame-xml ./mame.xml
 ./arcadejanitor source list --output table
 ./arcadejanitor mcp start ./roms --mame-xml ./mame.xml --catver ./catver.ini
-./arcadejanitor mcp install vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
-./arcadejanitor completions powershell
+./arcadejanitor mcp install --system vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor completions --shell powershell
 ```
 
 `rom move`, `rom delete`, and `source clear` only preview their operations unless
@@ -146,16 +146,21 @@ The CLI can start the packaged MCP server with the same metadata source options:
 
 ### Install in an agentic development system
 
-Use `arcadejanitor mcp install <system> <rom-folder>` to install the packaged MCP server as a
-user-scoped stdio server. The supported systems are `vscode`, `copilot-cli`, and `claude-code`.
+Use `arcadejanitor mcp install --system <system> [rom-folder]` to install the packaged MCP server as a
+user-scoped stdio or HTTP server. The supported systems are `vscode`, `vscode-insiders`,
+`copilot-cli`, and `claude-code`.
 Installation replaces the existing `arcadejanitor` server entry for that system without changing
 other configured servers.
 
 ```bash
-./arcadejanitor mcp install vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
-./arcadejanitor mcp install copilot-cli ./roms --mame-executable /path/to/mame
-./arcadejanitor mcp install claude-code ./roms
+./arcadejanitor mcp install --system vscode ./roms --mame-xml ./mame.xml --catver ./catver.ini
+./arcadejanitor mcp install --system copilot-cli ./roms --mame-executable /path/to/mame
+./arcadejanitor mcp install --system claude-code ./roms
 ```
+
+Install an HTTP server, including one hosted on another machine, with
+`--transport http --url http://host:3000/mcp`. HTTP installs require the server to be started
+manually; add `--start-now` and a local ROM folder to start it automatically after installation.
 
 The command uses each system's native user-scope registration interface: VS Code's active user
 profile, GitHub Copilot CLI's `~/.copilot/mcp-config.json`, and Claude Code's user-scoped
