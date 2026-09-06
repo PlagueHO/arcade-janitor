@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed VS Code MCP installation on Windows when the client launcher is installed
+  under a path containing spaces.
 - Fixed Windows MCP client installation when a supported CLI is exposed through a
   `.cmd` or `.bat` PATH launcher, including Unicode program names and actionable
   client-specific error messages.
