@@ -1798,7 +1798,7 @@ mod tests {
     fn quotes_windows_arguments_with_unicode_and_quotes() {
         assert_eq!(
             quote_windows_command_argument(OsStr::new(r#"ユニコード"引用"#)),
-            OsString::from(r#""ユニコード\"引用""#)
+            OsString::from("\"ユニコード\\\"引用\"")
         );
     }
 }
