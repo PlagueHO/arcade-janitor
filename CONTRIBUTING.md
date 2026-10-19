@@ -22,6 +22,25 @@ can accept the recommended extensions and run the workspace tasks from
 - Add a concise user-facing entry under `## [Unreleased]` in `CHANGELOG.md` using
   the appropriate Keep a Changelog category.
 
+## Dependency maintenance
+
+Dependabot follows the shared `dependabot-monthly-v1` policy. GitHub Actions and
+the root Cargo workspace are checked on the first day of each month at 09:00
+`Pacific/Auckland`. Minor and patch updates are grouped as
+`github-actions-minor-and-patch` and `cargo-minor-and-patch`; major updates remain
+individual pull requests.
+
+Security updates remain event-driven and are grouped separately as
+`github-actions-security` and `cargo-security`; they are not deferred to the
+monthly schedule or version-update cooldown. For an urgent routine update outside
+the monthly window, request a manual check from the repository's Dependabot
+interface. Manual checks can produce activity outside the normal schedule; the
+configured cooldown and pull request limits still apply.
+
+The current Dependabot scope does not cover the docs npm project or Dev Container
+features. Keep those as explicit coverage gaps unless they are added in a separate
+scope decision.
+
 ## Validation
 
 Run the checks relevant to your change before opening a pull request:
