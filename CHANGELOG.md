@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed CatVer parsing with the `ini` 2.0 dependency.
 - Fixed stdio MCP installs so missing ROM arguments fail fast instead of generating
   invalid server commands.
 - Fixed the VS Code build tasks to default to `cargo` while retaining Windows-only
