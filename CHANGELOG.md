@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed parameterless MCP tool calls when clients omit the optional arguments field.
 - Made MCP move and delete tools preview changes by default.
 - Kept diagnostic logs on stderr so they do not mix with CLI or stdio MCP data.
 - Fixed CatVer parsing with the `ini` 2.0 dependency.

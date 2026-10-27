@@ -336,7 +336,10 @@ async fn dispatch_request(
                 .get("name")
                 .and_then(Value::as_str)
                 .ok_or_else(|| ErrorData::invalid_params("Missing tool name", None))?;
-            let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let mut result = router.invoke_tool(name, arguments).await;
             result.result_type = None;
             serde_json::to_value(result)
@@ -390,7 +393,7 @@ impl ServerHandler for ArcadeJanitorRouter {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let arguments = request.arguments.map(Value::Object).unwrap_or(Value::Null);
+        let arguments = Value::Object(request.arguments.unwrap_or_default());
         Ok(self.invoke_tool(&request.name, arguments).await.into())
     }
 }

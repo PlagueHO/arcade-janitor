@@ -88,13 +88,35 @@ fn serves_mcp_tools_over_http_using_committed_fixture_and_temp_roms() {
     let url = format!("http://127.0.0.1:{port}");
     wait_for_server(&client, &url);
 
-    let response = call_tool(&client, &url, "scan_roms", json!({}));
-    assert_eq!(response["result"]["isError"], Value::Null);
-    let content = response["result"]["content"][0]["text"].as_str().unwrap();
-    let payload: Value = serde_json::from_str(content).unwrap();
-    assert_eq!(payload["ok"], true);
-    assert_eq!(payload["roms"].as_array().unwrap().len(), 101);
-    assert_eq!(payload["roms"][0]["name"], "game001");
+    for arguments in [None, Some(json!({}))] {
+        let mut params = json!({ "name": "scan_roms" });
+        if let Some(arguments) = arguments {
+            params["arguments"] = arguments;
+        }
+        let response: Value = client
+            .post(format!("{url}/mcp"))
+            .json(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": params
+            }))
+            .send()
+            .unwrap()
+            .json()
+            .unwrap();
+        assert_eq!(response["result"]["isError"], Value::Null);
+        let content = response["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(payload["ok"], true);
+        assert_eq!(payload["roms"].as_array().unwrap().len(), 101);
+        assert_eq!(payload["roms"][0]["name"], "game001");
+    }
+
+    for arguments in [Value::Null, json!([1]), json!("invalid")] {
+        let response = call_tool(&client, &url, "scan_roms", arguments);
+        assert_eq!(response["result"]["isError"], true);
+    }
 }
 
 #[test]
@@ -329,17 +351,17 @@ async fn serves_stdio_to_the_official_sdk_client() {
             let mut client = ().serve(transport).await.unwrap();
             let tools = client.list_tools(None).await.unwrap();
             assert_eq!(tools.tools.len(), if token.is_some() { 9 } else { 7 });
-            let result = client
-                .call_tool(
-                    CallToolRequestParams::new("scan_roms").with_arguments(rmcp::object!({})),
-                )
-                .await
-                .unwrap();
-            assert_ne!(result.is_error, Some(true));
-            let text = result.content[0].as_text().unwrap();
-            let payload: Value = serde_json::from_str(&text.text).unwrap();
-            assert_eq!(payload["ok"], true);
-            assert_eq!(payload["roms"].as_array().unwrap().len(), 100);
+            for request in [
+                CallToolRequestParams::new("scan_roms"),
+                CallToolRequestParams::new("scan_roms").with_arguments(rmcp::object!({})),
+            ] {
+                let result = client.call_tool(request).await.unwrap();
+                assert_ne!(result.is_error, Some(true));
+                let text = result.content[0].as_text().unwrap();
+                let payload: Value = serde_json::from_str(&text.text).unwrap();
+                assert_eq!(payload["ok"], true);
+                assert_eq!(payload["roms"].as_array().unwrap().len(), 100);
+            }
             let result = client
                 .call_tool(
                     CallToolRequestParams::new("delete_roms")
