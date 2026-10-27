@@ -170,7 +170,8 @@ configuration. The target client command (`code`, `copilot`, or `claude`) must b
 The server listens on `http://127.0.0.1:3000` by default. Keep it running in a
 separate terminal while using an MCP client. Set `ARCADEJANITOR_MCP_ADDR` to change
 the listen address. Set `ARCADEJANITOR_MCP_TOKEN` to enable the destructive tools
-(`move_roms` and `delete_roms`).
+(`move_roms` and `delete_roms`). These tools preview changes by default. Set
+`dry_run` to `false` to apply them.
 
 ### VS Code configuration
 

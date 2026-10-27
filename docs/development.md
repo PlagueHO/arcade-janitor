@@ -7,6 +7,15 @@ MCP server crate:
 - `src/arcadejanitor-cli` implements the command-line interface.
 - `src/arcadejanitor-mcp` provides the HTTP, WebSocket, and stdio MCP server.
 
+The MCP server uses the [official Rust `rmcp` SDK](https://github.com/modelcontextprotocol/rust-sdk).
+One tool handler serves all transports. Thin compatibility adapters keep the
+existing stateless HTTP calls, WebSocket framing, and newline-delimited stdio
+messages. The server continues to use MCP protocol version `2024-11-05`.
+Keep tool schemas, bearer-token checks, Origin checks, and server-configured
+ROM and metadata paths consistent across these adapters.
+Destructive MCP tools preview changes by default. A caller must set `dry_run`
+to `false` to apply a move or delete.
+
 ## Development environment
 
 The included Dev Container provides a Linux Rust development environment with
@@ -37,8 +46,34 @@ cargo test -p arcadejanitor-mcp --test http_integration
 ```
 
 The CLI test launches the compiled binary and verifies JSON output. The MCP
-test starts the server on an ephemeral localhost port and calls `scan_roms`
-through `POST /mcp`.
+tests check stateless HTTP calls, WebSocket messages, authorization, and stdio
+access from the official SDK client. Server diagnostics go to stderr; stdout
+contains only data or stdio protocol messages.
+
+## Documentation site
+
+The site uses VitePress `2.0.0-alpha.21`. This is a prerelease, selected to remove
+the vulnerable Vite 5 dependency chain without dependency overrides. Review the
+[VitePress release notes](https://github.com/vuejs/vitepress/blob/main/CHANGELOG.md)
+before the next upgrade. Check the build, navigation, images, theme, and code
+highlighting after an upgrade.
+
+Use Node.js 22.12 or later and pnpm 10, as used in docs CI. From `docs`, run:
+
+```shell
+npm exec --yes --package=pnpm@10 -- pnpm install --frozen-lockfile
+npm exec --yes --package=pnpm@10 -- pnpm build
+```
+
+For local development or a preview of the built site, run one of:
+
+```shell
+npm exec --yes --package=pnpm@10 -- pnpm dev --host 127.0.0.1
+npm exec --yes --package=pnpm@10 -- pnpm preview --host 127.0.0.1
+```
+
+Open the printed URL with the `/arcade-janitor/` base path. The build output
+remains in `docs/dist`. Use pnpm to update `pnpm-lock.yaml`; do not edit it by hand.
 
 ## Windows prerequisites
 
