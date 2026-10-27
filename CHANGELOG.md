@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Changed CLI data inputs to named options, leaving the ROM folder as the only
   permitted positional argument.
+- Aligned GitHub Actions and Cargo Dependabot updates with the shared monthly
+  maintenance policy.
 
 ### Added
 
