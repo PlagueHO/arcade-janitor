@@ -1,10 +1,59 @@
+# dependabot-monthly-v1: Routine updates run on the first day monthly; security updates remain event-driven.
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: /
+      interval: "monthly"
+      time: "09:00"
+      timezone: "Pacific/Auckland"
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    rebase-strategy: "auto"
+    groups:
+      github-actions-minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      github-actions-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+  - package-ecosystem: "cargo"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "monthly"
+      time: "09:00"
+      timezone: "Pacific/Auckland"
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps"
+    labels:
+      - "dependencies"
+      - "cargo"
+    rebase-strategy: "auto"
+    groups:
+      cargo-minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      cargo-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"

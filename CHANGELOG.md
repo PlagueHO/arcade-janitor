@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Changed CLI data inputs to named options, leaving the ROM folder as the only
   permitted positional argument.
+- Aligned GitHub Actions and Cargo Dependabot updates with the shared monthly
+  maintenance policy.
 
 ### Added
 
@@ -37,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed CatVer parsing with the `ini` 2.0 dependency.
 - Fixed stdio MCP installs so missing ROM arguments fail fast instead of generating
   invalid server commands.
 - Fixed the VS Code build tasks to default to `cargo` while retaining Windows-only
