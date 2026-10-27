@@ -9,7 +9,7 @@ pub fn parse_catver_file(path: impl AsRef<Path>) -> Result<HashMap<String, Genre
 }
 
 pub fn parse_catver_str(content: &str) -> Result<HashMap<String, Genre>> {
-    let parsed = ini::macro_safe_read(content).map_err(ArcadeJanitorError::Ini)?;
+    let parsed = ini::inistr!(safe cs content).map_err(ArcadeJanitorError::Ini)?;
     let mut genres = HashMap::new();
 
     if let Some(category) = parsed
@@ -37,5 +37,12 @@ mod tests {
 
         assert_eq!(genres["pacman"].category, "Maze");
         assert_eq!(genres["pacman"].subcategory.as_deref(), Some("Chase"));
+    }
+
+    #[test]
+    fn matches_category_section_case_insensitively() {
+        let genres = parse_catver_str("[cAtEgOrY]\nPacMan=Maze / Chase\n").unwrap();
+
+        assert!(genres.contains_key("PacMan"));
     }
 }
