@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Migrated the MCP server to the official Rust `rmcp` SDK while keeping its
+  HTTP, WebSocket, and stdio interfaces.
+- Upgraded the documentation site to VitePress `2.0.0-alpha.21`.
 - Changed CLI data inputs to named options, leaving the ROM folder as the only
   permitted positional argument.
 - Aligned GitHub Actions and Cargo Dependabot updates with the shared monthly
@@ -39,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Kept diagnostic logs on stderr so they do not mix with CLI or stdio MCP data.
 - Fixed CatVer parsing with the `ini` 2.0 dependency.
 - Fixed stdio MCP installs so missing ROM arguments fail fast instead of generating
   invalid server commands.
@@ -57,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Windows MCP client installation when a supported CLI is exposed through a
   `.cmd` or `.bat` PATH launcher, including Unicode program names and actionable
   client-specific error messages.
+
+### Security
+
+- Removed the old MCP dependency chain that used vulnerable `rustls-webpki`.
+- Replaced vulnerable documentation dependencies with Vite 8 and patched
+  Source Map JS dependencies. The new toolchain no longer uses Esbuild.
 
 ## [0.1.0] - 2026-08-30
 

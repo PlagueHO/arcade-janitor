@@ -1,6 +1,4 @@
-use std::{
-    collections::BTreeMap, future::Future, net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc,
-};
+use std::{collections::BTreeMap, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use arcadejanitor_core::metadata::{resolve_catver_path, resolve_mame_xml_path};
 use arcadejanitor_core::operations::{
@@ -21,18 +19,15 @@ use axum::{
     routing::{get, post},
 };
 use clap::{Parser, ValueEnum};
-use mcp_core_rs::{
-    Resource, Tool,
-    content::Content,
-    prompt::Prompt,
-    protocol::{
-        capabilities::ServerCapabilities,
-        error::ErrorData,
-        message::{JsonRpcRequest, JsonRpcResponse},
+use rmcp::{
+    RoleServer, ServerHandler,
+    model::{
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+        ErrorData, Implementation, JsonObject, ListToolsResult, PaginatedRequestParams,
+        ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
     },
+    service::RequestContext,
 };
-use mcp_error_rs::{Error as McpError, Result as McpResult};
-use mcp_server_rs::router::{capabilities::CapabilitiesBuilder, traits::Router as McpRouter};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
@@ -186,15 +181,17 @@ async fn handle_socket(mut socket: WebSocket, router: ArcadeJanitorRouter) {
             Ok(request) => handle_wire_request(router.clone(), request).await,
             Err(error) => Some(wire_error(None, -32700, error.to_string())),
         };
-        if let Some(response) = response
-            && socket
-                .send(Message::Text(
-                    serde_json::to_string(&response).unwrap_or_default().into(),
-                ))
-                .await
-                .is_err()
-        {
-            break;
+        if let Some(response) = response {
+            let text = match serde_json::to_string(&response) {
+                Ok(text) => text,
+                Err(error) => {
+                    warn!(%error, "could not serialize WebSocket MCP response");
+                    break;
+                }
+            };
+            if socket.send(Message::Text(text.into())).await.is_err() {
+                break;
+            }
         }
     }
 }
@@ -277,24 +274,6 @@ fn has_trusted_origin(headers: &HeaderMap) -> bool {
     })
 }
 
-async fn handle_request(
-    router: ArcadeJanitorRouter,
-    request: JsonRpcRequest,
-) -> Option<JsonRpcResponse> {
-    let id = request.id?;
-    let result = match request.method.as_str() {
-        "initialize" => router.handle_initialize(request).await,
-        "tools/list" => router.handle_tools_list(request).await,
-        "tools/call" => router.handle_tools_call(request).await,
-        _ => return Some(rpc_error(Some(id), -32601, "method not found")),
-    };
-    match result {
-        Ok(response) => Some(response),
-        Err(McpError::InvalidParameters(message)) => Some(rpc_error(Some(id), -32602, message)),
-        Err(error) => Some(rpc_error(Some(id), -32603, error.to_string())),
-    }
-}
-
 #[derive(Debug, Deserialize)]
 struct WireRequest {
     jsonrpc: String,
@@ -325,31 +304,52 @@ async fn handle_wire_request(
     router: ArcadeJanitorRouter,
     request: WireRequest,
 ) -> Option<WireResponse> {
-    let id = request.id.clone()?;
-    if request.method == "ping" {
-        return Some(WireResponse {
-            jsonrpc: request.jsonrpc,
-            id: Some(id),
-            result: Some(json!({})),
-            error: None,
-        });
-    }
-
-    let sdk_id = match &id {
-        WireId::Number(id) => *id,
-        WireId::String(_) => 0,
+    let id = request.id?;
+    let result = dispatch_request(&router, &request.method, request.params).await;
+    let (result, error) = match result {
+        Ok(result) => (Some(result), None),
+        Err(error) => (None, Some(error)),
     };
-    let response = handle_request(
-        router,
-        JsonRpcRequest::new(Some(sdk_id), request.method, request.params),
-    )
-    .await?;
     Some(WireResponse {
         jsonrpc: request.jsonrpc,
         id: Some(id),
-        result: response.result,
-        error: response.error,
+        result,
+        error,
     })
+}
+
+// Existing transports accept stateless calls, including calls before initialize.
+// Keep that framing while sharing the SDK handler's models and tool execution.
+async fn dispatch_request(
+    router: &ArcadeJanitorRouter,
+    method: &str,
+    params: Option<Value>,
+) -> Result<Value, ErrorData> {
+    let result = match method {
+        "initialize" => serde_json::to_value(router.get_info()),
+        "ping" => return Ok(json!({})),
+        "tools/list" => serde_json::to_value(router.available_tools()),
+        "tools/call" => {
+            let params =
+                params.ok_or_else(|| ErrorData::invalid_params("Missing parameters", None))?;
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ErrorData::invalid_params("Missing tool name", None))?;
+            let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+            let mut result = router.invoke_tool(name, arguments).await;
+            result.result_type = None;
+            serde_json::to_value(result)
+        }
+        _ => {
+            return Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "method not found",
+                None,
+            ));
+        }
+    };
+    result.map_err(|error| ErrorData::internal_error(error.to_string(), None))
 }
 
 fn wire_error(id: Option<WireId>, code: i32, message: impl Into<String>) -> WireResponse {
@@ -357,102 +357,84 @@ fn wire_error(id: Option<WireId>, code: i32, message: impl Into<String>) -> Wire
         jsonrpc: "2.0".to_string(),
         id,
         result: None,
-        error: Some(ErrorData {
-            code,
-            message: message.into(),
-            data: None,
-        }),
+        error: Some(ErrorData::new(ErrorCode(code), message.into(), None)),
     }
 }
 
-fn rpc_error(id: Option<u64>, code: i32, message: impl Into<String>) -> JsonRpcResponse {
-    JsonRpcResponse::error(
-        id,
-        ErrorData {
-            code,
-            message: message.into(),
-            data: None,
-        },
-    )
-}
-
-impl McpRouter for ArcadeJanitorRouter {
-    fn name(&self) -> String {
-        SERVER_NAME.to_string()
+impl ServerHandler for ArcadeJanitorRouter {
+    fn get_info(&self) -> ServerConfig {
+        let mut capabilities = ServerCapabilities::builder().enable_tools().build();
+        if let Some(tools) = &mut capabilities.tools {
+            tools.list_changed = Some(false);
+        }
+        ServerConfig::new(capabilities)
+            .with_protocol_version(ProtocolVersion::V_2024_11_05)
+            .with_server_info(Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")))
+            .with_instructions("Manage ROM folders; inspect, query, and filter MAME XML metadata; and list and query catver categories, subcategories, and entries.")
     }
 
-    fn instructions(&self) -> String {
-        "Manage ROM folders; inspect, query, and filter MAME XML metadata; and list and query catver categories, subcategories, and entries.".to_string()
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        std::borrow::Cow::Borrowed(&[ProtocolVersion::V_2024_11_05])
     }
 
-    fn capabilities(&self) -> ServerCapabilities {
-        CapabilitiesBuilder::new().with_tools(false).build()
-    }
-
-    fn list_tools(&self) -> Vec<Tool> {
-        tools()
-            .into_iter()
-            .filter(|tool| self.destructive_tools_allowed || !is_destructive_tool(&tool.name))
-            .collect()
-    }
-
-    fn call_tool(
+    async fn list_tools(
         &self,
-        tool_name: &str,
-        arguments: Value,
-    ) -> Pin<Box<dyn Future<Output = McpResult<Vec<Content>>> + Send + 'static>> {
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(self.available_tools())
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let arguments = request.arguments.map(Value::Object).unwrap_or(Value::Null);
+        Ok(self.invoke_tool(&request.name, arguments).await.into())
+    }
+}
+
+impl ArcadeJanitorRouter {
+    fn available_tools(&self) -> ListToolsResult {
+        ListToolsResult::with_all_items(
+            tools()
+                .into_iter()
+                .filter(|tool| self.destructive_tools_allowed || !is_destructive_tool(&tool.name))
+                .collect(),
+        )
+    }
+
+    async fn invoke_tool(&self, tool_name: &str, arguments: Value) -> CallToolResult {
+        if is_destructive_tool(tool_name) && !self.destructive_tools_allowed {
+            return CallToolResult::error(vec![ContentBlock::text(
+                "Protocol error: authorization is required for destructive tools",
+            )]);
+        }
         let tool_name = tool_name.to_string();
-        let destructive_tools_allowed = self.destructive_tools_allowed;
         let configuration = Arc::clone(&self.configuration);
-        Box::pin(async move {
-            if is_destructive_tool(&tool_name) && !destructive_tools_allowed {
-                return Err(McpError::Protocol(
-                    "authorization is required for destructive tools".to_string(),
-                ));
-            }
-            let response = tokio::task::spawn_blocking(move || {
-                execute_tool(&tool_name, arguments, &configuration)
-            })
-            .await
-            .map_err(|error| McpError::System(error.to_string()))?;
-            if response.get("ok").and_then(Value::as_bool) == Some(true) {
-                Ok(vec![Content::text(response.to_string())])
-            } else {
-                Err(McpError::System(
-                    response
-                        .get("error")
-                        .and_then(Value::as_str)
-                        .unwrap_or("tool execution failed")
-                        .to_string(),
-                ))
-            }
+        match tokio::task::spawn_blocking(move || {
+            execute_tool(&tool_name, arguments, &configuration)
         })
-    }
-
-    fn list_resources(&self) -> Vec<Resource> {
-        Vec::new()
-    }
-
-    fn read_resource(
-        &self,
-        _uri: &str,
-    ) -> Pin<Box<dyn Future<Output = McpResult<String>> + Send + 'static>> {
-        Box::pin(async {
-            Err(McpError::Protocol(
-                "resources are not supported".to_string(),
-            ))
-        })
-    }
-
-    fn list_prompts(&self) -> Vec<Prompt> {
-        Vec::new()
-    }
-
-    fn get_prompt(
-        &self,
-        _prompt_name: &str,
-    ) -> Pin<Box<dyn Future<Output = McpResult<String>> + Send + 'static>> {
-        Box::pin(async { Err(McpError::Protocol("prompts are not supported".to_string())) })
+        .await
+        {
+            Ok(response) if response.get("ok").and_then(Value::as_bool) == Some(true) => {
+                let mut result =
+                    CallToolResult::success(vec![ContentBlock::text(response.to_string())]);
+                result.is_error = None;
+                result
+            }
+            Ok(response) => {
+                let message = response
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool execution failed");
+                CallToolResult::error(vec![ContentBlock::text(format!("system error: {message}"))])
+            }
+            Err(error) => {
+                CallToolResult::error(vec![ContentBlock::text(format!("system error: {error}"))])
+            }
+        }
     }
 }
 
@@ -754,16 +736,16 @@ fn tools() -> Vec<Tool> {
     ]
 }
 
-fn metadata_schema() -> Value {
-    json!({
+fn metadata_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {},
         "additionalProperties": false
     })
 }
 
-fn query_schema() -> Value {
-    json!({
+fn query_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {
             "name": { "type": "string" }
@@ -773,16 +755,16 @@ fn query_schema() -> Value {
     })
 }
 
-fn mame_xml_schema() -> Value {
-    json!({
+fn mame_xml_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {},
         "additionalProperties": false
     })
 }
 
-fn mame_filter_schema() -> Value {
-    json!({
+fn mame_filter_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {
             "options": filter_options_schema()
@@ -791,8 +773,8 @@ fn mame_filter_schema() -> Value {
     })
 }
 
-fn filter_schema() -> Value {
-    json!({
+fn filter_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {
             "options": filter_options_schema()
@@ -850,8 +832,8 @@ fn filter_options_schema() -> Value {
     })
 }
 
-fn move_schema() -> Value {
-    json!({
+fn move_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {
             "filter": filter_schema(),
@@ -863,8 +845,8 @@ fn move_schema() -> Value {
     })
 }
 
-fn delete_schema() -> Value {
-    json!({
+fn delete_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {
             "filter": filter_schema(),
@@ -875,8 +857,8 @@ fn delete_schema() -> Value {
     })
 }
 
-fn catver_schema() -> Value {
-    json!({
+fn catver_schema() -> JsonObject {
+    rmcp::object!({
         "type": "object",
         "properties": {
             "query": { "type": ["string", "null"] },
@@ -971,6 +953,7 @@ struct CatverSubcategory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::ServiceExt;
 
     fn test_configuration() -> Arc<ServerConfiguration> {
         Arc::new(ServerConfiguration {
@@ -978,6 +961,38 @@ mod tests {
             mame_xml: PathBuf::from("mame.xml"),
             catver: PathBuf::from("catver.ini"),
         })
+    }
+
+    #[tokio::test]
+    async fn serves_the_same_tools_through_the_official_sdk() {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let (client_transport, server_transport) = tokio::io::duplex(16384);
+            let server = tokio::spawn(async move {
+                ArcadeJanitorRouter {
+                    destructive_tools_allowed: false,
+                    configuration: test_configuration(),
+                }
+                .serve(server_transport)
+                .await
+                .unwrap()
+            });
+            let client = ().serve(client_transport).await.unwrap();
+            let mut server = server.await.unwrap();
+            let tools = client.list_tools(None).await.unwrap();
+            assert_eq!(tools.tools.len(), 7);
+            let result = client
+                .call_tool(
+                    CallToolRequestParams::new("delete_roms")
+                        .with_arguments(rmcp::object!({"filter": {}, "dry_run": true})),
+                )
+                .await
+                .unwrap();
+            assert_eq!(result.is_error, Some(true));
+            client.cancel().await.unwrap();
+            server.close().await.unwrap();
+        })
+        .await
+        .expect("official SDK interoperability timed out");
     }
 
     #[test]
@@ -1019,12 +1034,17 @@ mod tests {
 
     #[tokio::test]
     async fn lists_required_tools_with_schemas_and_preserves_request_id() {
-        let response = handle_request(
+        let response = handle_wire_request(
             ArcadeJanitorRouter {
                 destructive_tools_allowed: true,
                 configuration: test_configuration(),
             },
-            JsonRpcRequest::new(Some(42), "tools/list", None),
+            WireRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(WireId::Number(42)),
+                method: "tools/list".to_string(),
+                params: None,
+            },
         )
         .await;
         let response = response.unwrap();
@@ -1033,7 +1053,7 @@ mod tests {
             .unwrap()
             .clone();
 
-        assert_eq!(response.id, Some(42));
+        assert!(matches!(response.id, Some(WireId::Number(42))));
         let scan = tools
             .iter()
             .find(|tool| tool["name"] == "scan_roms")
@@ -1208,7 +1228,8 @@ mod tests {
         assert!(!router_for_request(&state, &headers).destructive_tools_allowed);
         assert!(
             router_for_request(&state, &headers)
-                .list_tools()
+                .available_tools()
+                .tools
                 .iter()
                 .all(|tool| !is_destructive_tool(&tool.name))
         );
