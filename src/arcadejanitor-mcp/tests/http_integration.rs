@@ -172,6 +172,12 @@ fn preserves_stateless_http_protocol_and_authorization() {
                 .unwrap()
                 .contains_key("rom_folder")
         );
+        if tool["name"] == "move_roms" || tool["name"] == "delete_roms" {
+            assert_eq!(
+                tool["inputSchema"]["properties"]["dry_run"]["default"],
+                true
+            );
+        }
     }
 
     for (id, method) in [(json!(7), "ping"), (json!("unknown"), "unknown/method")] {

@@ -719,10 +719,14 @@ fn tools() -> Vec<Tool> {
         ),
         Tool::new(
             "move_roms",
-            "Move filtered ROM files to a target folder",
+            "Preview or move filtered ROM files to a target folder",
             move_schema(),
         ),
-        Tool::new("delete_roms", "Delete filtered ROM files", delete_schema()),
+        Tool::new(
+            "delete_roms",
+            "Preview or delete filtered ROM files",
+            delete_schema(),
+        ),
         Tool::new(
             "generate_report",
             "Generate a simple metadata report",
@@ -838,7 +842,11 @@ fn move_schema() -> JsonObject {
         "properties": {
             "filter": filter_schema(),
             "target_folder": { "type": "string" },
-            "dry_run": { "type": "boolean" }
+            "dry_run": {
+                "type": "boolean",
+                "default": true,
+                "description": "Set to false to apply changes. Defaults to true."
+            }
         },
         "required": ["filter", "target_folder"],
         "additionalProperties": false
@@ -850,7 +858,11 @@ fn delete_schema() -> JsonObject {
         "type": "object",
         "properties": {
             "filter": filter_schema(),
-            "dry_run": { "type": "boolean" }
+            "dry_run": {
+                "type": "boolean",
+                "default": true,
+                "description": "Set to false to apply changes. Defaults to true."
+            }
         },
         "required": ["filter"],
         "additionalProperties": false
@@ -901,7 +913,7 @@ struct FilterArgs {
 struct MoveArgs {
     filter: FilterArgs,
     target_folder: PathBuf,
-    #[serde(default)]
+    #[serde(default = "default_dry_run")]
     dry_run: bool,
 }
 
@@ -909,8 +921,12 @@ struct MoveArgs {
 #[serde(deny_unknown_fields)]
 struct DeleteArgs {
     filter: FilterArgs,
-    #[serde(default)]
+    #[serde(default = "default_dry_run")]
     dry_run: bool,
+}
+
+fn default_dry_run() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -1114,23 +1130,24 @@ mod tests {
             json!({
                 "filter": {
                 },
-                "target_folder": target_folder,
-                "dry_run": true
+                "target_folder": target_folder
             }),
             &configuration,
         );
 
         assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
+        assert!(rom_folder.join("available.zip").exists());
+        assert!(!target_folder.exists());
         let response = execute_tool(
             "delete_roms",
             json!({
-                "filter": {},
-                "dry_run": true
+                "filter": {}
             }),
             &configuration,
         );
 
         assert_eq!(response, json!({ "ok": true, "roms": ["available"] }));
+        assert!(rom_folder.join("available.zip").exists());
         std::fs::remove_dir_all(folder).unwrap();
     }
 

@@ -13,6 +13,8 @@ existing stateless HTTP calls, WebSocket framing, and newline-delimited stdio
 messages. The server continues to use MCP protocol version `2024-11-05`.
 Keep tool schemas, bearer-token checks, Origin checks, and server-configured
 ROM and metadata paths consistent across these adapters.
+Destructive MCP tools preview changes by default. A caller must set `dry_run`
+to `false` to apply a move or delete.
 
 ## Development environment
 
