@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added deterministic populated CLI and MCP flow tests for exact JSON results,
+  safe move/delete execution, collisions, authorization, audits, and metadata
+  cache operations.
+- Added `ARCADEJANITOR_CACHE_DIR` for an explicit managed cache directory,
+  including isolated process tests on Windows.
 - Added HTTP and stdio transport selection to `mcp install`, including optional
   automatic startup for locally hosted HTTP MCP servers.
 - Added a VitePress documentation website with installation, CLI, MCP server, and development guides.
@@ -42,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed test isolation for mixed-case Windows environment settings and made
+  stdio test cleanup wait for the server process after a failure.
 - Fixed parameterless MCP tool calls when clients omit the optional arguments field.
 - Made MCP move and delete tools preview changes by default.
 - Kept diagnostic logs on stderr so they do not mix with CLI or stdio MCP data.

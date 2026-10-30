@@ -1,12 +1,58 @@
-use std::path::Path;
+use std::{
+    fs,
+    ops::{Deref, DerefMut},
+    path::Path,
+    process::Output,
+    time::Duration,
+};
 
 use assert_cmd::{Command, cargo::cargo_bin};
 use predicates::prelude::*;
 use serde_json::Value;
 use tempfile::TempDir;
 
-fn command() -> Command {
-    Command::new(cargo_bin!("arcadejanitor"))
+#[path = "../../../tests/support/mod.rs"]
+mod support;
+
+use support::{FlowFixture, PACMAN_BYTES, names};
+
+struct IsolatedCommand {
+    command: Command,
+    _directory: TempDir,
+}
+
+impl Deref for IsolatedCommand {
+    type Target = Command;
+
+    fn deref(&self) -> &Self::Target {
+        &self.command
+    }
+}
+
+impl DerefMut for IsolatedCommand {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.command
+    }
+}
+
+fn command_in(root: &Path) -> Command {
+    let mut command = Command::new(cargo_bin!("arcadejanitor"));
+    for name in support::inherited_application_settings() {
+        command.env_remove(name);
+    }
+    command
+        .envs(support::environment(root))
+        .current_dir(root)
+        .timeout(Duration::from_secs(15));
+    command
+}
+
+fn command() -> IsolatedCommand {
+    let directory = tempfile::tempdir().unwrap();
+    IsolatedCommand {
+        command: command_in(directory.path()),
+        _directory: directory,
+    }
 }
 
 fn fixture() -> TempDir {
@@ -85,7 +131,7 @@ fn scans_committed_100_entry_fixture_with_temporary_roms() {
     let catalog: Value = serde_json::from_slice(&catalog_output.stdout).unwrap();
     assert_eq!(catalog.as_array().unwrap().len(), 100);
 
-    command()
+    let output = command()
         .args([
             "rom",
             "list",
@@ -97,12 +143,14 @@ fn scans_committed_100_entry_fixture_with_temporary_roms() {
             "--catver",
             catver.to_str().unwrap(),
         ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(r#""name": "game001""#))
-        .stdout(predicate::str::contains(r#""name": "game050""#))
-        .stdout(predicate::str::contains(r#""name": "game100""#))
-        .stdout(predicate::str::contains("not-in-catalog").not());
+        .output()
+        .unwrap();
+    let available = output_json(&output, 0);
+    assert_eq!(names(&available), ["game001", "game050", "game100"]);
+    for row in available.as_array().unwrap() {
+        assert_eq!(row["available"], true);
+        assert_eq!(row["catalogued"], true);
+    }
 }
 
 #[test]
@@ -689,4 +737,494 @@ fn reports_metadata_and_rom_folder_errors() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("I/O error"));
+}
+
+fn flow_command(fixture: &FlowFixture, arguments: &[&str]) -> Command {
+    let mut command = command_in(fixture.directory.path());
+    command
+        .args(arguments)
+        .arg("--mame-xml")
+        .arg(&fixture.mame_xml)
+        .arg("--catver")
+        .arg(&fixture.catver)
+        .args(["--output", "json"]);
+    command
+}
+
+fn output_json(output: &Output, code: i32) -> Value {
+    assert_eq!(
+        output.status.code(),
+        Some(code),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "invalid JSON: {error}\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+fn flow_json(fixture: &FlowFixture, arguments: &[&str]) -> Value {
+    output_json(&flow_command(fixture, arguments).output().unwrap(), 0)
+}
+
+#[test]
+fn populated_read_flows_match_shared_semantic_expectations() {
+    let fixture = FlowFixture::new();
+    let roms = fixture.roms.to_str().unwrap();
+    let all = flow_json(&fixture, &["rom", "list", roms, "--status", "all"]);
+    support::assert_initial_scan(&all, false);
+    assert_eq!(
+        names(&flow_json(&fixture, &["rom", "list", roms])),
+        ["galaga", "pacman"]
+    );
+    assert_eq!(
+        names(&flow_json(
+            &fixture,
+            &["rom", "list", roms, "--status", "missing"]
+        )),
+        ["missing"]
+    );
+    assert_eq!(
+        names(&flow_json(
+            &fixture,
+            &["rom", "list", roms, "--status", "unmatched"]
+        )),
+        ["unknown"]
+    );
+    let filtered = flow_json(&fixture, &["rom", "list", roms, "--category", "Maze"]);
+    assert_eq!(names(&filtered), ["pacman"]);
+    assert_eq!(filtered[0]["region"], "usa");
+    let catalog = flow_json(&fixture, &["catalog", "list"]);
+    let mut expected = support::expected_collection();
+    expected.as_array_mut().unwrap().pop();
+    for row in expected.as_array_mut().unwrap() {
+        row["available"] = serde_json::json!(false);
+    }
+    assert_eq!(support::normalize_roms(&catalog, false), expected);
+    let metadata = flow_json(&fixture, &["catalog", "show", "--name", "PACMAN"]);
+    assert_eq!(names(&metadata), ["pacman"]);
+    assert_eq!(metadata[0]["available"], false);
+    assert_eq!(metadata[0]["category"], "Maze");
+    assert_eq!(metadata[0]["subcategory"], "Chase");
+    assert_eq!(
+        support::normalize_categories(&flow_json(&fixture, &["category", "list"]), false),
+        support::expected_categories()
+    );
+    assert_eq!(
+        names(&flow_json(
+            &fixture,
+            &["category", "show", "--category", "Maze"]
+        )),
+        ["pacman", "missing"]
+    );
+    let stats = flow_json(
+        &fixture,
+        &["rom", "stats", roms, "--show-missing", "--show-unmatched"],
+    );
+    assert_eq!(
+        stats,
+        serde_json::json!({
+            "total": 4, "available": 2, "missing": 1, "unmatched": 1,
+            "by_category": {
+                "Maze": {"total": 2, "available": 1, "missing": 1, "unmatched": 0},
+                "Shooter": {"total": 1, "available": 1, "missing": 0, "unmatched": 0},
+                "Unknown": {"total": 1, "available": 0, "missing": 0, "unmatched": 1}
+            },
+            "missing_roms": ["missing"], "unmatched_roms": ["unknown"]
+        })
+    );
+    fixture.assert_unrelated_files();
+}
+
+#[test]
+fn rom_show_checks_availability_and_unknown_name_errors() {
+    let fixture = FlowFixture::new();
+    let roms = fixture.roms.to_str().unwrap();
+    for (name, available, catalogued) in [
+        ("PACMAN", true, true),
+        ("missing", false, true),
+        ("unknown", true, false),
+    ] {
+        let rows = flow_json(&fixture, &["rom", "show", roms, "--name", name]);
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["name"], name.to_ascii_lowercase());
+        assert_eq!(rows[0]["available"], available);
+        assert_eq!(rows[0]["catalogued"], catalogued);
+        assert_eq!(rows[0]["path"].is_string(), available);
+    }
+    flow_command(&fixture, &["rom", "show", roms, "--name", "absent"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(predicate::str::contains("ROM 'absent' was not found"));
+}
+
+#[test]
+fn audit_reports_exact_findings_and_respects_failure_thresholds() {
+    let fixture = FlowFixture::new();
+    let roms = fixture.roms.to_str().unwrap();
+    fs::write(fixture.roms.join("pacman.7z"), b"duplicate bytes").unwrap();
+    fs::write(
+        &fixture.catver,
+        "[Category]\npacman=Maze / Chase\nmissing=Maze / Chase\n",
+    )
+    .unwrap();
+    for threshold in ["warning", "error"] {
+        let output = flow_command(&fixture, &["rom", "audit", roms, "--fail-on", threshold])
+            .output()
+            .unwrap();
+        let findings = output_json(&output, 2);
+        assert_eq!(
+            findings
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| {
+                    (
+                        row["kind"].as_str().unwrap(),
+                        row["name"].as_str().unwrap(),
+                        row["level"].as_str().unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [
+                ("duplicate", "pacman", "error"),
+                ("metadata", "galaga", "warning"),
+                ("missing", "missing", "warning"),
+                ("unmatched", "unknown", "error")
+            ]
+        );
+        assert!(
+            findings[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("multiple archives resolve")
+        );
+        assert_eq!(
+            findings[1]["message"],
+            "available ROM has no category metadata"
+        );
+        assert_eq!(
+            findings[2]["message"],
+            "catalog entry has no archive in the ROM directory"
+        );
+        assert_eq!(
+            findings[3]["message"],
+            "archive has no matching runnable catalog entry"
+        );
+    }
+    fs::remove_file(fixture.roms.join("pacman.7z")).unwrap();
+    fs::remove_file(fixture.roms.join("unknown.zip")).unwrap();
+    fs::write(&fixture.catver, support::CATVER).unwrap();
+    let warning = flow_command(&fixture, &["rom", "audit", roms, "--fail-on", "warning"])
+        .output()
+        .unwrap();
+    let error = flow_command(&fixture, &["rom", "audit", roms, "--fail-on", "error"])
+        .output()
+        .unwrap();
+    assert_eq!(output_json(&warning, 2), output_json(&error, 0));
+    fs::write(fixture.roms.join("missing.zip"), b"previously missing").unwrap();
+    assert_eq!(
+        flow_json(&fixture, &["rom", "audit", roms]),
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn move_and_delete_preview_execute_and_rescan_preserve_file_bytes() {
+    for action in ["move", "delete"] {
+        let fixture = FlowFixture::new();
+        let destination = fixture.directory.path().join("moved");
+        let mut args = vec![
+            "rom",
+            action,
+            fixture.roms.to_str().unwrap(),
+            "--name",
+            "pacman",
+        ];
+        if action == "move" {
+            args.extend(["--destination", destination.to_str().unwrap()]);
+        }
+        let preview = flow_json(&fixture, &args);
+        assert_eq!(names(&preview), ["pacman"]);
+        assert_eq!(preview[0]["action"], action);
+        assert_eq!(preview[0]["state"], "preview");
+        assert_eq!(
+            fs::read(fixture.roms.join("pacman.zip")).unwrap(),
+            PACMAN_BYTES
+        );
+        assert!(!destination.exists());
+        fixture.assert_unrelated_files();
+        support::assert_initial_scan(
+            &flow_json(
+                &fixture,
+                &[
+                    "rom",
+                    "list",
+                    fixture.roms.to_str().unwrap(),
+                    "--status",
+                    "all",
+                ],
+            ),
+            false,
+        );
+        if action == "move" {
+            fs::create_dir(&destination).unwrap();
+            fs::write(destination.join("notes.txt"), support::NOTE_BYTES).unwrap();
+        }
+        args.push("--execute");
+        let executed = flow_json(&fixture, &args);
+        assert_eq!(names(&executed), ["pacman"]);
+        assert_eq!(executed[0]["state"], "executed");
+        assert!(!fixture.roms.join("pacman.zip").exists());
+        if action == "move" {
+            assert_eq!(
+                fs::read(destination.join("pacman.zip")).unwrap(),
+                PACMAN_BYTES
+            );
+            assert_eq!(
+                fs::read(destination.join("notes.txt")).unwrap(),
+                support::NOTE_BYTES
+            );
+            assert_eq!(fs::read_dir(&destination).unwrap().count(), 2);
+        } else {
+            assert!(!destination.exists());
+        }
+        fixture.assert_unrelated_files();
+        support::assert_rescan(
+            &flow_json(
+                &fixture,
+                &[
+                    "rom",
+                    "list",
+                    fixture.roms.to_str().unwrap(),
+                    "--status",
+                    "all",
+                ],
+            ),
+            false,
+        );
+    }
+}
+
+#[test]
+fn move_collisions_leave_source_and_destination_unchanged() {
+    let fixture = FlowFixture::new();
+    let destination = fixture.directory.path().join("collision");
+    fs::create_dir(&destination).unwrap();
+    fs::write(destination.join("pacman.zip"), b"existing destination").unwrap();
+    for execute in [false, true] {
+        let mut args = vec![
+            "rom",
+            "move",
+            fixture.roms.to_str().unwrap(),
+            "--name",
+            "pacman",
+            "--destination",
+            destination.to_str().unwrap(),
+        ];
+        if execute {
+            args.push("--execute");
+        }
+        flow_command(&fixture, &args)
+            .assert()
+            .code(1)
+            .stdout("")
+            .stderr(predicate::str::contains("target already exists"));
+        assert_eq!(
+            fs::read(fixture.roms.join("pacman.zip")).unwrap(),
+            PACMAN_BYTES
+        );
+        assert_eq!(
+            fs::read(destination.join("pacman.zip")).unwrap(),
+            b"existing destination"
+        );
+        fixture.assert_unrelated_files();
+    }
+}
+
+#[test]
+fn isolated_cache_clear_previews_and_executes_only_selected_files() {
+    for target in ["mame", "catver", "all"] {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("cache");
+        fs::create_dir(&cache).unwrap();
+        fs::write(cache.join("mame.xml"), support::MAME_XML).unwrap();
+        fs::write(cache.join("catver.ini"), support::CATVER).unwrap();
+        fs::write(cache.join("notes.txt"), support::NOTE_BYTES).unwrap();
+        let args = ["source", "clear", "--target", target, "--output", "json"];
+        let preview = output_json(
+            &command_in(directory.path()).args(args).output().unwrap(),
+            0,
+        );
+        let expected_names: Vec<&str> = match target {
+            "mame" => vec!["mame.xml"],
+            "catver" => vec!["catver.ini"],
+            _ => vec!["mame.xml", "catver.ini"],
+        };
+        assert_eq!(names(&preview), expected_names);
+        for row in preview.as_array().unwrap() {
+            assert_eq!(row["state"], "preview");
+            assert_eq!(row["action"], "clear");
+            assert_eq!(
+                row["source"],
+                cache.join(row["name"].as_str().unwrap()).to_str().unwrap()
+            );
+        }
+        assert_eq!(
+            fs::read(cache.join("mame.xml")).unwrap(),
+            support::MAME_XML.as_bytes()
+        );
+        assert_eq!(
+            fs::read(cache.join("catver.ini")).unwrap(),
+            support::CATVER.as_bytes()
+        );
+        let executed = output_json(
+            &command_in(directory.path())
+                .args(args)
+                .arg("--execute")
+                .output()
+                .unwrap(),
+            0,
+        );
+        assert_eq!(names(&executed), expected_names);
+        for row in executed.as_array().unwrap() {
+            assert_eq!(row["state"], "executed");
+        }
+        for (name, bytes) in [
+            ("mame.xml", support::MAME_XML),
+            ("catver.ini", support::CATVER),
+        ] {
+            if expected_names.contains(&name) {
+                assert!(!cache.join(name).exists());
+            } else {
+                assert_eq!(fs::read(cache.join(name)).unwrap(), bytes.as_bytes());
+            }
+        }
+        assert_eq!(
+            fs::read(cache.join("notes.txt")).unwrap(),
+            support::NOTE_BYTES
+        );
+        let repeated = output_json(
+            &command_in(directory.path())
+                .args(args)
+                .arg("--execute")
+                .output()
+                .unwrap(),
+            0,
+        );
+        for row in repeated.as_array().unwrap() {
+            assert_eq!(row["state"], "skipped");
+        }
+    }
+}
+
+#[test]
+fn mame_extraction_refresh_and_cache_reuse_preserve_last_valid_metadata() {
+    let fixture = FlowFixture::new();
+    let executable = fixture
+        .directory
+        .path()
+        .join(format!("fake-mame{}", std::env::consts::EXE_SUFFIX));
+    let mut compiler = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()));
+    compiler
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/support/fake_mame.rs"))
+        .arg("-o")
+        .arg(&executable)
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+    let calls = fixture.directory.path().join("calls.txt");
+    let mut extract = command_in(fixture.directory.path());
+    extract
+        .args(["catalog", "list", "--output", "json"])
+        .arg("--catver")
+        .arg(&fixture.catver)
+        .arg("--mame-executable")
+        .arg(&executable)
+        .env("FAKE_MAME_CALLS", &calls)
+        .env("FAKE_MAME_XML", &fixture.mame_xml);
+    let mut rows = output_json(&extract.output().unwrap(), 0);
+    assert_eq!(names(&rows), ["galaga", "missing", "pacman"]);
+    let cache = fixture.directory.path().join("cache");
+    assert_eq!(
+        fs::read(cache.join("mame.xml")).unwrap(),
+        support::MAME_XML.as_bytes()
+    );
+    fs::write(cache.join("catver.ini"), support::CATVER).unwrap();
+    let cached = output_json(
+        &command_in(fixture.directory.path())
+            .args(["catalog", "list", "--output", "json"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(cached, rows);
+    assert_eq!(fs::read_to_string(&calls).unwrap(), "-listxml\n");
+    let refreshed_xml = support::MAME_XML.replace("Pac-Man (USA)", "Pac-Man Updated (USA)");
+    fs::write(&fixture.mame_xml, &refreshed_xml).unwrap();
+    rows[2]["description"] = serde_json::json!("Pac-Man Updated (USA)");
+    for mode in ["success", "fail", "invalid", "empty", "encoding"] {
+        let mut refresh = command_in(fixture.directory.path());
+        refresh
+            .args(["source", "refresh", "--target", "mame", "--output", "json"])
+            .arg("--mame-executable")
+            .arg(&executable)
+            .env("FAKE_MAME_CALLS", &calls)
+            .env("FAKE_MAME_XML", &fixture.mame_xml)
+            .env("FAKE_MAME_MODE", mode);
+        let output = refresh.output().unwrap();
+        if mode == "success" {
+            let details = output_json(&output, 0);
+            assert_eq!(details.as_array().unwrap().len(), 2);
+            for (index, source, filename, size) in [
+                (0, "mame", "mame.xml", refreshed_xml.len()),
+                (1, "catver", "catver.ini", support::CATVER.len()),
+            ] {
+                assert_eq!(details[index]["source"], source);
+                assert_eq!(details[index]["state"], "available");
+                assert_eq!(
+                    details[index]["path"],
+                    cache.join(filename).to_str().unwrap()
+                );
+                assert_eq!(details[index]["size_bytes"], size);
+            }
+        } else {
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            let diagnostic = String::from_utf8(output.stderr).unwrap();
+            let expected = match mode {
+                "fail" => "failed to run",
+                "encoding" => "not valid UTF-8",
+                _ => "failed to parse XML",
+            };
+            assert!(diagnostic.contains(expected), "{diagnostic}");
+        }
+        assert_eq!(
+            fs::read(cache.join("mame.xml")).unwrap(),
+            refreshed_xml.as_bytes()
+        );
+        assert_eq!(
+            output_json(
+                &command_in(fixture.directory.path())
+                    .args(["catalog", "list", "--output", "json"])
+                    .output()
+                    .unwrap(),
+                0
+            ),
+            rows
+        );
+        assert_eq!(
+            fs::read(cache.join("catver.ini")).unwrap(),
+            support::CATVER.as_bytes()
+        );
+        assert_eq!(fs::read_dir(&cache).unwrap().count(), 2);
+    }
+    assert_eq!(fs::read_to_string(&calls).unwrap(), "-listxml\n".repeat(6));
+    fixture.assert_unrelated_files();
 }
