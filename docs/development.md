@@ -109,6 +109,98 @@ the developer environment:
 & .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-mcp', '--test', 'http_integration', '--locked')
 ```
 
+## Release package tests
+
+The release workflow extracts each Linux, macOS, and Windows archive into a
+new, empty temporary directory. It runs the extracted CLI and MCP server with
+`--help`, checks exact CLI JSON against committed metadata, and starts the
+sibling MCP server through the extracted CLI. A read-only `scan_roms` HTTP
+tool call must return the expected metadata and availability for all fixture
+entries and the unmatched archive.
+
+The test uses the existing custom HTTP interface. It does not claim
+Streamable HTTP compatibility. See
+[#31](https://github.com/PlagueHO/arcade-janitor/issues/31) for that evaluation.
+No AI client, MAME installation, or external network service is needed.
+
+The test requires `ARCADEJANITOR_RELEASE_PACKAGE_DIR` to name an extracted
+archive containing both executables. It uses absolute executable paths and
+never falls back to build outputs or `PATH`. Missing executables fail the
+test. The package test is ignored during normal workspace tests because
+those tests do not create release archives. The release workflow selects
+the package test explicitly before uploading the archive. A failure on any
+platform blocks publication.
+
+Build both release executables before creating a local archive:
+
+```shell
+cargo build -p arcadejanitor-cli -p arcadejanitor-mcp --release --locked
+```
+
+On Linux or macOS, create and extract a package with the same archive layout
+as the release workflow:
+
+```bash
+(
+set -euo pipefail
+archive="$(mktemp -d)"
+trap 'rm -rf -- "$archive"' EXIT
+mkdir "$archive/package" "$archive/extracted"
+cp target/release/arcadejanitor target/release/arcadejanitor-mcp "$archive/package/"
+tar -czf "$archive/package.tar.gz" -C "$archive/package" arcadejanitor arcadejanitor-mcp
+tar -xzf "$archive/package.tar.gz" -C "$archive/extracted"
+export ARCADEJANITOR_RELEASE_PACKAGE_DIR="$archive/extracted"
+cargo test -p arcadejanitor-mcp --test release_package --locked extracted_release_package -- --ignored --exact --nocapture
+)
+```
+
+On Windows, use PowerShell:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$archive = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path "$archive\package" | Out-Null
+try {
+    Copy-Item target\release\arcadejanitor.exe, target\release\arcadejanitor-mcp.exe -Destination "$archive\package"
+    Compress-Archive -Path "$archive\package\*" -DestinationPath "$archive\package.zip"
+    $env:ARCADEJANITOR_RELEASE_PACKAGE_DIR = "$archive\extracted"
+    Expand-Archive -Path "$archive\package.zip" -DestinationPath $env:ARCADEJANITOR_RELEASE_PACKAGE_DIR
+    & .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-mcp', '--test', 'release_package', '--locked', 'extracted_release_package', '--', '--ignored', '--exact', '--nocapture')
+    if ($LASTEXITCODE -ne 0) { throw "Release package test failed: $LASTEXITCODE" }
+} finally {
+    if (Test-Path Env:\ARCADEJANITOR_RELEASE_PACKAGE_DIR) {
+        Remove-Item Env:\ARCADEJANITOR_RELEASE_PACKAGE_DIR
+    }
+    Remove-Item -LiteralPath $archive -Recurse -Force
+}
+```
+
+Do not repair executable permissions after extraction. The test must detect
+incorrect permissions in the archive. All test ROMs, caches, configuration,
+and process output use isolated temporary directories. Commands have a
+15-second limit. Server startup has a 10-second limit. Incomplete health
+responses are retried within this limit. HTTP requests and
+each process cleanup wait have 5-second limits. Release test steps also have
+a 15-minute outer limit.
+
+The process guard stops the CLI and its server child before removing files.
+It uses a separate
+[Unix process group](https://doc.rust-lang.org/std/os/unix/process/trait.CommandExt.html#tymethod.process_group)
+or a Windows
+[job object](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+The Windows-only `windows-sys` development dependency supplies the job APIs.
+The launcher starts suspended, joins the job, and then resumes. This prevents
+children from starting before the job owns them. Closing the job also stops
+remaining children if cleanup fails. Unix cleanup uses
+[`/bin/kill -KILL -- -PGID`](https://man7.org/linux/man-pages/man1/kill.1.html)
+to keep the negative process group ID separate from options.
+Only the test process tree is stopped, even after the launcher exits.
+Regression tests check explicit cleanup, guard drop, and output collection
+after launcher exit. The package test checks cleanup after
+both a successful tool call and an induced failure after startup. It checks
+that the listener is closed. Failures include captured process diagnostics.
+Workflow cleanup removes the extracted package even when the test fails.
+
 ## Documentation site
 
 The site uses VitePress `2.0.0-alpha.21`. This is a prerelease, selected to remove
