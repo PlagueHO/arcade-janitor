@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added release package smoke tests on Linux, macOS, and Windows before
+  publication, including fresh archive extraction, bounded startup checks,
+  extracted CLI queries, and MCP server calls through the packaged CLI.
 - Added deterministic populated CLI and MCP flow tests for exact JSON results,
   safe move/delete execution, collisions, authorization, audits, and metadata
   cache operations.

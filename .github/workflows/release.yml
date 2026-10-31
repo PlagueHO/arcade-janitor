@@ -51,7 +51,7 @@ jobs:
             echo "Tag must match vX.Y.Z, got: $GITHUB_REF_NAME" >&2
             exit 1
           fi
-      - run: cargo build -p arcadejanitor-cli -p arcadejanitor-mcp --release
+      - run: cargo build -p arcadejanitor-cli -p arcadejanitor-mcp --release --locked
       - name: Package Unix binaries
         if: runner.os != 'Windows'
         shell: bash
@@ -73,6 +73,46 @@ jobs:
           New-Item -ItemType Directory -Path package -Force | Out-Null
           Copy-Item target/release/arcadejanitor.exe, target/release/arcadejanitor-mcp.exe -Destination package
           Compress-Archive -Path package/* -DestinationPath $archive
+      - name: Test extracted Unix package
+        if: runner.os != 'Windows'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ARCADEJANITOR_RELEASE_PACKAGE_DIR: ${{ runner.temp }}/release-package
+        run: |
+          set -euo pipefail
+          mkdir "$ARCADEJANITOR_RELEASE_PACKAGE_DIR"
+          tar -xzf "arcadejanitor-${GITHUB_REF_NAME}-${PLATFORM}.tar.gz" -C "$ARCADEJANITOR_RELEASE_PACKAGE_DIR"
+          cargo test -p arcadejanitor-mcp --test release_package --locked extracted_release_package -- --ignored --exact --nocapture
+      - name: Test extracted Windows package
+        if: runner.os == 'Windows'
+        timeout-minutes: 15
+        shell: pwsh
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ARCADEJANITOR_RELEASE_PACKAGE_DIR: ${{ runner.temp }}\release-package
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $env:ARCADEJANITOR_RELEASE_PACKAGE_DIR | Out-Null
+          Expand-Archive -Path "arcadejanitor-$env:GITHUB_REF_NAME-$env:PLATFORM.zip" -DestinationPath $env:ARCADEJANITOR_RELEASE_PACKAGE_DIR
+          cargo test -p arcadejanitor-mcp --test release_package --locked extracted_release_package -- --ignored --exact --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Remove extracted Unix package
+        if: always() && runner.os != 'Windows'
+        shell: bash
+        env:
+          ARCADEJANITOR_RELEASE_PACKAGE_DIR: ${{ runner.temp }}/release-package
+        run: rm -rf -- "$ARCADEJANITOR_RELEASE_PACKAGE_DIR"
+      - name: Remove extracted Windows package
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ARCADEJANITOR_RELEASE_PACKAGE_DIR: ${{ runner.temp }}\release-package
+        run: |
+          if (Test-Path -LiteralPath $env:ARCADEJANITOR_RELEASE_PACKAGE_DIR) {
+            Remove-Item -LiteralPath $env:ARCADEJANITOR_RELEASE_PACKAGE_DIR -Recurse -Force
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: arcadejanitor-${{ matrix.platform }}
