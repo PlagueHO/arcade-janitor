@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Documented the custom MCP HTTP contract, official SDK support limits,
+  current specification gaps, and a separate Streamable HTTP migration proposal.
 - Removed duplicate CI integration test runs and enforced the committed Cargo
   lockfile for CI lint, test, and build commands on all three platforms.
 - Migrated the MCP server to the official Rust `rmcp` SDK while keeping its
@@ -21,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added populated official SDK HTTP regression coverage and an explicit
+  reproducer for unsupported modern MCP discovery, without changing server behavior.
 - Added release package smoke tests on Linux, macOS, and Windows before
   publication, including fresh archive extraction, bounded startup checks,
   extracted CLI queries, and MCP server calls through the packaged CLI.

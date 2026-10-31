@@ -38,6 +38,40 @@ Set `ARCADEJANITOR_MCP_TOKEN` to enable destructive tools such as moving and
 deleting ROMs. HTTP clients must send the token as
 `Authorization: Bearer <token>`.
 
+## HTTP transport contract
+
+`POST /mcp` is a **custom, stateless JSON-RPC transport**. It is not the
+standard HTTP+SSE transport from MCP `2024-11-05`, and it does not claim
+Streamable HTTP compliance.
+
+Supported JSON-RPC requests receive one JSON response with HTTP 200 and
+`Content-Type: application/json`. Notifications receive HTTP 202 with no
+body. Calls do not require an initialization handshake. If a client sends
+`initialize`, the server always reports `2024-11-05`; it does not negotiate
+the requested version. `GET /mcp` and `DELETE /mcp` return HTTP 405.
+There are no SSE streams, session IDs, or server-to-client HTTP notifications.
+
+Read-only tools remain available without a token or with an incorrect token.
+A correct bearer token enables destructive tools. An unauthorized
+destructive call returns an MCP tool error, not an HTTP 401 challenge.
+This is a static token control, not MCP OAuth authorization.
+
+The official Rust `rmcp` `3.8.0` HTTP client completes its default
+initialization-based flow: initialization, tool discovery, a populated
+read-only call, the initialized notification, and client close. It accepts
+the server's `2024-11-05` response. This measured client result does not
+establish compliance with that revision or with current Streamable HTTP.
+
+The same SDK's modern `2026-07-28` discovery mode fails at
+`server/discover` with JSON-RPC error `-32601: method not found`.
+The endpoint does not validate HTTP protocol-version metadata or HTTP
+Origin headers. Do not expose it to untrusted networks on the assumption
+that it implements the standard HTTP protections.
+
+See the [HTTP compatibility evaluation](./development.md#http-client-compatibility-evaluation)
+for the tested contract, specification references, and reproducible commands.
+Use stdio when a client requires a standard supported connection.
+
 ## Install a stdio server
 
 The CLI can register a user-scoped stdio server for VS Code, GitHub Copilot CLI,
@@ -55,6 +89,10 @@ be available on `PATH`. Re-running the command replaces only the existing
 `arcadejanitor` server entry for that client.
 
 ## Install an HTTP server
+
+HTTP registration writes a client configuration. It does not verify a
+connection or make the endpoint Streamable HTTP compliant. The client
+must support the custom contract described above.
 
 Use `--transport http` to register an HTTP MCP endpoint. HTTP installation does
 not require a local ROM folder, so it can register a server running on another
