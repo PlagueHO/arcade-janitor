@@ -27,9 +27,12 @@ Run the workspace quality checks from the repository root:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
+
+`--locked` makes Cargo fail if `Cargo.lock` is missing or dependency resolution
+would change it. Keep this option for validation against the committed lockfile.
 
 ## Integration tests
 
@@ -41,8 +44,8 @@ ArcadeJanitor cache or ROM collection.
 Run the end-to-end test suites with:
 
 ```powershell
-cargo test -p arcadejanitor-cli --test cli
-cargo test -p arcadejanitor-mcp --test http_integration
+cargo test -p arcadejanitor-cli --test cli --locked
+cargo test -p arcadejanitor-mcp --test http_integration --locked
 ```
 
 The CLI tests launch the compiled binary and parse JSON output. The MCP tests
@@ -87,19 +90,23 @@ process guards stop and reap children after failures.
 Run the focused metadata tests with:
 
 ```powershell
-cargo test -p arcadejanitor-core metadata::tests
+cargo test -p arcadejanitor-core --locked metadata::tests
 ```
 
-The existing CI workflow runs these tests through `cargo test --workspace`
-and runs both process suites in its Linux, macOS, and Windows matrix. No tests
-require network access outside the machine.
+CI runs `cargo test --workspace --locked` once on each platform in its Linux,
+macOS, and Windows matrix. This command includes the core unit and integration
+tests, both process suites, and library documentation tests. It includes all
+metadata, CLI, and MCP flows added in
+[#28](https://github.com/PlagueHO/arcade-janitor/issues/28). The focused commands
+above are optional local checks, not extra CI steps. No tests require network
+access outside the machine.
 
 On Windows, use the Visual C++ wrapper if the current terminal has not loaded
 the developer environment:
 
 ```powershell
-& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-cli', '--test', 'cli')
-& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-mcp', '--test', 'http_integration')
+& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-cli', '--test', 'cli', '--locked')
+& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-mcp', '--test', 'http_integration', '--locked')
 ```
 
 ## Documentation site

@@ -39,11 +39,7 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-      - name: Run integration tests
-        run: |
-          cargo test -p arcadejanitor-core --test integration
-          cargo test -p arcadejanitor-cli --test cli
-          cargo test -p arcadejanitor-mcp --test http_integration
-      - run: cargo build --workspace
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Run unit, integration, end-to-end, and documentation tests
+        run: cargo test --workspace --locked
+      - run: cargo build --workspace --locked
