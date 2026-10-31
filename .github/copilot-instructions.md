@@ -26,12 +26,18 @@ CLI and MCP server rather than duplicating ROM, metadata, or output behavior.
 Run the smallest relevant validation command before completing a change:
 
 - Formatting: `cargo fmt --all -- --check`
-- Linting: `cargo clippy --workspace --all-targets -- -D warnings`
-- Tests: `cargo test --workspace`
+- Linting: `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- Tests: `cargo test --workspace --locked`
 - Targeted integration tests:
-  - `cargo test -p arcadejanitor-core --test integration`
-  - `cargo test -p arcadejanitor-cli --test cli`
-  - `cargo test -p arcadejanitor-mcp --test http_integration`
+  - `cargo test -p arcadejanitor-core --test integration --locked`
+  - `cargo test -p arcadejanitor-cli --test cli --locked`
+  - `cargo test -p arcadejanitor-mcp --test http_integration --locked`
+
+CI runs the workspace test command once per platform. It includes unit,
+integration, end-to-end, and documentation tests. Use targeted commands only for
+focused local validation, not as extra CI steps. Keep `--locked` on Cargo commands
+that resolve dependencies so validation fails if the lockfile is missing or must
+change. Do not add it to `cargo fmt`.
 
 For VS Code on Windows, use the supplied MCP build and integration-test tasks when
 the Visual C++ environment is required.

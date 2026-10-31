@@ -47,17 +47,22 @@ Run the checks relevant to your change before opening a pull request:
 
 ```shell
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo build --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build --workspace --locked
 ```
+
+CI runs the workspace test command once on Linux, macOS, and Windows. It includes
+unit, integration, end-to-end, and documentation tests. Do not repeat the focused
+integration commands in CI. `--locked` makes Cargo fail if `Cargo.lock` is missing
+or dependency resolution would change it.
 
 For focused integration validation, use one or more of:
 
 ```shell
-cargo test -p arcadejanitor-core --test integration
-cargo test -p arcadejanitor-cli --test cli
-cargo test -p arcadejanitor-mcp --test http_integration
+cargo test -p arcadejanitor-core --test integration --locked
+cargo test -p arcadejanitor-cli --test cli --locked
+cargo test -p arcadejanitor-mcp --test http_integration --locked
 ```
 
 On Windows, the supplied VS Code MCP build and integration-test tasks initialize the

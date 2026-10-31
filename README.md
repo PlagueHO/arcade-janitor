@@ -247,8 +247,8 @@ developer's ArcadeJanitor cache or ROM collection.
 Run the end-to-end suites with:
 
 ```powershell
-cargo test -p arcadejanitor-cli --test cli
-cargo test -p arcadejanitor-mcp --test http_integration
+cargo test -p arcadejanitor-cli --test cli --locked
+cargo test -p arcadejanitor-mcp --test http_integration --locked
 ```
 
 The CLI test launches the compiled binary and verifies JSON output. The MCP
@@ -295,9 +295,14 @@ workspace's recommended extensions. The MCP API is forwarded on port `3000`.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
+
+CI runs the workspace test command once per platform. It includes unit,
+integration, end-to-end, and documentation tests. The focused commands above are
+optional local checks. `--locked` makes Cargo fail if the committed lockfile is
+missing or must change.
 
 <!-- Badge reference links -->
 [ci-shield]: https://img.shields.io/github/actions/workflow/status/PlagueHO/arcade-janitor/ci.yml?branch=main&label=CI

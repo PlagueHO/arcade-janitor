@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed duplicate CI integration test runs and enforced the committed Cargo
+  lockfile for CI lint, test, and build commands on all three platforms.
 - Migrated the MCP server to the official Rust `rmcp` SDK while keeping its
   HTTP, WebSocket, and stdio interfaces.
 - Upgraded the documentation site to VitePress `2.0.0-alpha.21`.
