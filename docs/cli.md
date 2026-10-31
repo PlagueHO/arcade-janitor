@@ -73,5 +73,13 @@ Inspect or maintain metadata caches with:
 ```
 
 Like ROM mutations, `source clear` previews its operation until `--execute` is
-specified. Generate shell completion scripts with
+specified.
+
+The CLI and MCP server use the system cache folder by default. Set
+`ARCADEJANITOR_CACHE_DIR` to use a different managed cache directory. The
+directory contains `mame.xml` and `catver.ini` directly. An empty value keeps the
+default location. This setting does not change explicit metadata file paths.
+`source clear` acts only on these two managed files.
+
+Generate shell completion scripts with
 `arcadejanitor completions --shell powershell`, replacing `powershell` with your shell.

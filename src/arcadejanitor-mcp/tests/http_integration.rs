@@ -1,9 +1,10 @@
 use std::{
-    net::TcpListener,
+    fs::{self, File},
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use reqwest::blocking::Client;
@@ -11,12 +12,78 @@ use rmcp::{ServiceExt, model::CallToolRequestParams};
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
 
-struct ServerProcess(Child);
+#[path = "../../../tests/support/mod.rs"]
+mod support;
+
+use support::{FlowFixture, PACMAN_BYTES};
+
+struct ServerProcess {
+    child: Child,
+    diagnostics: PathBuf,
+    _directory: tempfile::TempDir,
+}
 
 impl Drop for ServerProcess {
     fn drop(&mut self) {
-        self.0.kill().expect("stop MCP test server");
-        self.0.wait().expect("reap MCP test server");
+        match self.child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(error) => eprintln!("cannot inspect MCP test server during cleanup: {error}"),
+        }
+        if let Err(error) = self.child.kill() {
+            eprintln!("cannot stop MCP test server: {error}");
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => thread::sleep(Duration::from_millis(10)),
+                Err(error) => {
+                    eprintln!("cannot reap MCP test server: {error}");
+                    return;
+                }
+            }
+        }
+        eprintln!("MCP test server cleanup exceeded 5 seconds");
+    }
+}
+
+impl ServerProcess {
+    fn stderr(&self) -> String {
+        fs::read_to_string(&self.diagnostics).expect("read captured MCP diagnostics")
+    }
+}
+
+struct StdioProcess(tokio::process::Child);
+
+impl StdioProcess {
+    fn stop_and_reap(&mut self) {
+        match self.0.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(error) => eprintln!("cannot inspect stdio MCP test server during cleanup: {error}"),
+        }
+        if let Err(error) = self.0.start_kill() {
+            eprintln!("cannot stop stdio MCP test server: {error}");
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            match self.0.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => thread::sleep(Duration::from_millis(10)),
+                Err(error) => {
+                    eprintln!("cannot reap stdio MCP test server: {error}");
+                    return;
+                }
+            }
+        }
+        eprintln!("stdio MCP test server cleanup exceeded 5 seconds");
+    }
+}
+
+impl Drop for StdioProcess {
+    fn drop(&mut self) {
+        self.stop_and_reap();
     }
 }
 
@@ -26,8 +93,24 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn start_server(port: u16, rom_folder: &Path, mame_xml: &Path, catver: &Path) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_arcadejanitor-mcp"))
+fn start_server(port: u16, rom_folder: &Path, mame_xml: &Path, catver: &Path) -> ServerProcess {
+    start_server_with_token(port, rom_folder, mame_xml, catver, None)
+}
+
+fn start_server_with_token(
+    port: u16,
+    rom_folder: &Path,
+    mame_xml: &Path,
+    catver: &Path,
+    token: Option<&str>,
+) -> ServerProcess {
+    let directory = tempfile::tempdir().unwrap();
+    let diagnostics = directory.path().join("stderr.txt");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_arcadejanitor-mcp"));
+    for name in support::inherited_application_settings() {
+        command.env_remove(name);
+    }
+    command
         .args([
             "--rom-folder",
             rom_folder.to_str().unwrap(),
@@ -36,31 +119,102 @@ fn start_server(port: u16, rom_folder: &Path, mame_xml: &Path, catver: &Path) ->
             "--catver",
             catver.to_str().unwrap(),
         ])
+        .envs(support::environment(directory.path()))
+        .current_dir(directory.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(File::create(&diagnostics).unwrap())
         .env("ARCADEJANITOR_MCP_ADDR", format!("127.0.0.1:{port}"))
-        .spawn()
-        .unwrap()
+        .env("RUST_LOG", "arcadejanitor_mcp=info");
+    if let Some(token) = token {
+        command.env("ARCADEJANITOR_MCP_TOKEN", token);
+    }
+    let child = command.spawn().unwrap();
+    ServerProcess {
+        child,
+        diagnostics,
+        _directory: directory,
+    }
 }
 
-fn wait_for_server(client: &Client, url: &str) {
-    for _ in 0..50 {
-        if client.get(format!("{url}/health")).send().is_ok() {
-            return;
+fn readiness(
+    server: &mut ServerProcess,
+    client: &Client,
+    url: &str,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    let mut last_response = String::from("no response");
+    while Instant::now() < deadline {
+        if let Some(status) = server.child.try_wait().map_err(|error| error.to_string())? {
+            return Err(format!(
+                "MCP command {} exited before readiness: {status}\nstderr: {}",
+                env!("CARGO_BIN_EXE_arcadejanitor-mcp"),
+                server.stderr()
+            ));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match client
+            .get(format!("{url}/health"))
+            .timeout(remaining.min(Duration::from_millis(200)))
+            .send()
+        {
+            Ok(response) => {
+                let status = response.status();
+                let body = response.text().map_err(|error| error.to_string())?;
+                if status.is_success() && body == "ok (arcadejanitor)" {
+                    return Ok(());
+                }
+                last_response = format!("HTTP {status}, body: {body:?}");
+            }
+            Err(error) => last_response = error.to_string(),
         }
         thread::sleep(Duration::from_millis(20));
     }
-    panic!("MCP server did not become ready");
+    Err(format!(
+        "MCP command {} did not become ready at {url}: {last_response}\nstderr: {}",
+        env!("CARGO_BIN_EXE_arcadejanitor-mcp"),
+        server.stderr()
+    ))
+}
+
+fn wait_for_server(server: &mut ServerProcess, client: &Client, url: &str) {
+    readiness(server, client, url, Duration::from_secs(10))
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 fn call_tool(client: &Client, url: &str, name: &str, arguments: Value) -> Value {
-    client
-        .post(format!("{url}/mcp"))
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": { "name": name, "arguments": arguments }
-        }))
+    http_call(client, url, name, arguments, None)
+}
+
+fn http_call(
+    client: &Client,
+    url: &str,
+    name: &str,
+    arguments: Value,
+    token: Option<&str>,
+) -> Value {
+    let mut request = client.post(format!("{url}/mcp")).json(&json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": name, "arguments": arguments }
+    }));
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+    request
         .send()
+        .unwrap()
+        .error_for_status()
         .unwrap()
         .json()
         .unwrap()
@@ -80,13 +234,14 @@ fn serves_mcp_tools_over_http_using_committed_fixture_and_temp_roms() {
     drop(listener);
     let mame_xml = fixture("mame-100.xml");
     let catver = fixture("catver-100.ini");
-    let _server = ServerProcess(start_server(port, &roms, &mame_xml, &catver));
+    let mut server = start_server(port, &roms, &mame_xml, &catver);
     let client = Client::builder()
         .timeout(Duration::from_secs(2))
+        .no_proxy()
         .build()
         .unwrap();
     let url = format!("http://127.0.0.1:{port}");
-    wait_for_server(&client, &url);
+    wait_for_server(&mut server, &client, &url);
 
     for arguments in [None, Some(json!({}))] {
         let mut params = json!({ "name": "scan_roms" });
@@ -111,6 +266,15 @@ fn serves_mcp_tools_over_http_using_committed_fixture_and_temp_roms() {
         assert_eq!(payload["ok"], true);
         assert_eq!(payload["roms"].as_array().unwrap().len(), 101);
         assert_eq!(payload["roms"][0]["name"], "game001");
+        let available: Vec<_> = payload["roms"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| !row["rom_path"].is_null())
+            .map(|row| row["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(available, ["game001", "game050", "unmatched"]);
+        assert_eq!(payload["roms"][100]["catalogued"], false);
     }
 
     for arguments in [Value::Null, json!([1]), json!("invalid")] {
@@ -122,28 +286,25 @@ fn serves_mcp_tools_over_http_using_committed_fixture_and_temp_roms() {
 #[test]
 fn preserves_stateless_http_protocol_and_authorization() {
     let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("game001.zip"), b"protected archive").unwrap();
+    std::fs::write(directory.path().join("notes.txt"), b"protected note").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_arcadejanitor-mcp"));
-    let child = command
-        .arg("--rom-folder")
-        .arg(directory.path())
-        .arg("--mame-xml")
-        .arg(fixture("mame-100.xml"))
-        .arg("--catver")
-        .arg(fixture("catver-100.ini"))
-        .env("ARCADEJANITOR_MCP_ADDR", format!("127.0.0.1:{port}"))
-        .env("ARCADEJANITOR_MCP_TOKEN", "test-token")
-        .spawn()
-        .unwrap();
-    let _server = ServerProcess(child);
+    let mut server = start_server_with_token(
+        port,
+        directory.path(),
+        &fixture("mame-100.xml"),
+        &fixture("catver-100.ini"),
+        Some("test-token"),
+    );
     let client = Client::builder()
         .timeout(Duration::from_secs(5))
+        .no_proxy()
         .build()
         .unwrap();
     let url = format!("http://127.0.0.1:{port}");
-    wait_for_server(&client, &url);
+    wait_for_server(&mut server, &client, &url);
     let request = |body: Value, token: Option<&str>| {
         let mut request = client.post(format!("{url}/mcp")).json(&body);
         if let Some(token) = token {
@@ -164,6 +325,30 @@ fn preserves_stateless_http_protocol_and_authorization() {
                 .iter()
                 .all(|tool| { tool["name"] != "move_roms" && tool["name"] != "delete_roms" })
         );
+        for name in ["move_roms", "delete_roms"] {
+            let mut arguments =
+                json!({"filter": {"options": {"names": ["game001"]}}, "dry_run": false});
+            if name == "move_roms" {
+                arguments["target_folder"] = json!(directory.path().join("moved"));
+            }
+            let response = http_call(&client, &url, name, arguments, token);
+            assert_eq!(response["result"]["isError"], true);
+            assert!(
+                response["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("authorization is required")
+            );
+            assert_eq!(
+                fs::read(directory.path().join("game001.zip")).unwrap(),
+                b"protected archive"
+            );
+            assert_eq!(
+                fs::read(directory.path().join("notes.txt")).unwrap(),
+                b"protected note"
+            );
+            assert!(!directory.path().join("moved").exists());
+        }
     }
     let response: Value = request(list_request, Some("test-token")).json().unwrap();
     let names: Vec<_> = response["result"]["tools"]
@@ -287,8 +472,10 @@ fn preserves_stateless_http_protocol_and_authorization() {
     untrusted
         .headers_mut()
         .insert("Origin", "https://example.com".parse().unwrap());
-    match tungstenite::connect(untrusted).unwrap_err() {
-        tungstenite::Error::Http(response) => assert_eq!(response.status(), 403),
+    match tungstenite::client(untrusted, websocket_stream(port)).unwrap_err() {
+        tungstenite::HandshakeError::Failure(tungstenite::Error::Http(response)) => {
+            assert_eq!(response.status(), 403)
+        }
         error => panic!("unexpected WebSocket rejection: {error}"),
     }
     let mut trusted = ws_url.as_str().into_client_request().unwrap();
@@ -298,12 +485,7 @@ fn preserves_stateless_http_protocol_and_authorization() {
     trusted
         .headers_mut()
         .insert("Authorization", "Bearer test-token".parse().unwrap());
-    let (mut socket, _) = tungstenite::connect(trusted).unwrap();
-    if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_mut() {
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-    }
+    let (mut socket, _) = tungstenite::client(trusted, websocket_stream(port)).unwrap();
     socket.send(tungstenite::Message::text("not JSON")).unwrap();
     let response: Value = serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
     assert_eq!(response["error"]["code"], -32700);
@@ -318,67 +500,540 @@ fn preserves_stateless_http_protocol_and_authorization() {
     socket.close(None).unwrap();
 }
 
+fn websocket_stream(port: u16) -> TcpStream {
+    let address = format!("127.0.0.1:{port}").parse().unwrap();
+    let stream = TcpStream::connect_timeout(&address, Duration::from_secs(5)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+}
+
 #[tokio::test]
 async fn serves_stdio_to_the_official_sdk_client() {
-    tokio::time::timeout(Duration::from_secs(15), async {
+    tokio::time::timeout(Duration::from_secs(60), async {
         for token in [None, Some("test-token")] {
-            let directory = tempfile::tempdir().unwrap();
+            let fixture = FlowFixture::new();
+            let diagnostics = fixture.directory.path().join("stderr.txt");
             let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_arcadejanitor-mcp"));
+            for name in support::inherited_application_settings() {
+                command.env_remove(name);
+            }
             command
                 .arg("--transport")
                 .arg("stdio")
                 .arg("--rom-folder")
-                .arg(directory.path())
-                .arg("--mame-xml")
-                .arg(fixture("mame-100.xml"))
-                .arg("--catver")
-                .arg(fixture("catver-100.ini"))
+                .arg(&fixture.roms)
+                .envs(support::environment(fixture.directory.path()))
+                .current_dir(fixture.directory.path())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+                .stderr(File::create(&diagnostics).unwrap())
                 .env("RUST_LOG", "arcadejanitor_mcp=info")
                 .kill_on_drop(true);
             match token {
                 Some(token) => {
                     command.env("ARCADEJANITOR_MCP_TOKEN", token);
+                    let cache = fixture.directory.path().join("cache");
+                    fs::write(cache.join("mame.xml"), support::MAME_XML).unwrap();
+                    fs::write(cache.join("catver.ini"), support::CATVER).unwrap();
                 }
                 None => {
                     command.env_remove("ARCADEJANITOR_MCP_TOKEN");
+                    command
+                        .arg("--mame-xml")
+                        .arg(&fixture.mame_xml)
+                        .arg("--catver")
+                        .arg(&fixture.catver);
                 }
             }
-            let mut child = command.spawn().unwrap();
-            let transport = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-            let mut client = ().serve(transport).await.unwrap();
-            let tools = client.list_tools(None).await.unwrap();
-            assert_eq!(tools.tools.len(), if token.is_some() { 9 } else { 7 });
-            for request in [
-                CallToolRequestParams::new("scan_roms"),
-                CallToolRequestParams::new("scan_roms").with_arguments(rmcp::object!({})),
-            ] {
-                let result = client.call_tool(request).await.unwrap();
-                assert_ne!(result.is_error, Some(true));
-                let text = result.content[0].as_text().unwrap();
-                let payload: Value = serde_json::from_str(&text.text).unwrap();
-                assert_eq!(payload["ok"], true);
-                assert_eq!(payload["roms"].as_array().unwrap().len(), 100);
-            }
-            let result = client
-                .call_tool(
-                    CallToolRequestParams::new("delete_roms")
-                        .with_arguments(rmcp::object!({"filter": {}, "dry_run": true})),
-                )
+            let mut child = StdioProcess(command.spawn().unwrap());
+            let transport = (
+                child.0.stdout.take().unwrap(),
+                child.0.stdin.take().unwrap(),
+            );
+            let mut client =
+                match tokio::time::timeout(Duration::from_secs(10), ().serve(transport)).await {
+                    Ok(Ok(client)) => client,
+                    Ok(Err(error)) => panic!(
+                        "stdio initialization failed: {error}\nstderr: {}",
+                        fs::read_to_string(&diagnostics).unwrap()
+                    ),
+                    Err(error) => panic!(
+                        "stdio initialization timed out: {error}\nstderr: {}",
+                        fs::read_to_string(&diagnostics).unwrap()
+                    ),
+                };
+            let tools = tokio::time::timeout(Duration::from_secs(5), client.list_tools(None))
                 .await
+                .unwrap()
                 .unwrap();
-            assert_eq!(result.is_error == Some(true), token.is_none());
-            client.close().await.unwrap();
-            let output = child.wait_with_output().await.unwrap();
-            assert!(output.status.success());
-            let diagnostics = String::from_utf8(output.stderr).unwrap();
-            if token.is_none() {
-                assert!(diagnostics.contains("destructive MCP tools are disabled"));
+            assert_eq!(tools.tools.len(), if token.is_some() { 9 } else { 7 });
+            let omitted = tokio::time::timeout(
+                Duration::from_secs(5),
+                client.call_tool(CallToolRequestParams::new("scan_roms")),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_ne!(omitted.is_error, Some(true));
+            support::assert_initial_scan(
+                &serde_json::from_str::<Value>(&omitted.content[0].as_text().unwrap().text)
+                    .unwrap()["roms"],
+                true,
+            );
+            for (name, arguments) in read_requests() {
+                let result = sdk_call(&client, name, arguments, &diagnostics).await;
+                assert_read_payload(name, &sdk_payload(&result));
             }
+            let unknown = sdk_call(
+                &client,
+                "query_metadata",
+                json!({"name": "absent"}),
+                &diagnostics,
+            )
+            .await;
+            assert_eq!(unknown.is_error, Some(true));
+            assert!(
+                unknown.content[0]
+                    .as_text()
+                    .unwrap()
+                    .text
+                    .contains("was not found")
+            );
+            if token.is_none() {
+                for name in ["move_roms", "delete_roms"] {
+                    let destination = fixture.directory.path().join("unauthorized");
+                    let result = sdk_call(
+                        &client,
+                        name,
+                        mutation_arguments(name, &destination, Some(false)),
+                        &diagnostics,
+                    )
+                    .await;
+                    assert_eq!(result.is_error, Some(true));
+                    assert!(
+                        result.content[0]
+                            .as_text()
+                            .unwrap()
+                            .text
+                            .contains("authorization is required")
+                    );
+                    assert_eq!(
+                        fs::read(fixture.roms.join("pacman.zip")).unwrap(),
+                        PACMAN_BYTES
+                    );
+                    fixture.assert_unrelated_files();
+                    assert!(!destination.exists());
+                }
+                assert!(
+                    fs::read_to_string(&diagnostics)
+                        .unwrap()
+                        .contains("destructive MCP tools are disabled")
+                );
+            } else {
+                for name in ["move_roms", "delete_roms"] {
+                    fs::write(fixture.roms.join("pacman.zip"), PACMAN_BYTES).unwrap();
+                    let destination = fixture.directory.path().join(format!("sdk-{name}"));
+                    if name == "move_roms" {
+                        fs::create_dir(&destination).unwrap();
+                        fs::write(destination.join("pacman.zip"), b"collision bytes").unwrap();
+                        for dry_run in [true, false] {
+                            let result = sdk_call(
+                                &client,
+                                name,
+                                mutation_arguments(name, &destination, Some(dry_run)),
+                                &diagnostics,
+                            )
+                            .await;
+                            assert_eq!(result.is_error, Some(true));
+                            assert!(
+                                result.content[0]
+                                    .as_text()
+                                    .unwrap()
+                                    .text
+                                    .contains("pacman.zip")
+                            );
+                            assert_collision_bytes(&fixture, &destination);
+                        }
+                        fs::remove_file(destination.join("pacman.zip")).unwrap();
+                        fs::remove_dir(&destination).unwrap();
+                    }
+                    for dry_run in [None, Some(true), Some(false)] {
+                        if name == "move_roms" && dry_run == Some(false) {
+                            fs::create_dir(&destination).unwrap();
+                            fs::write(destination.join("notes.txt"), support::NOTE_BYTES).unwrap();
+                        }
+                        let result = sdk_call(
+                            &client,
+                            name,
+                            mutation_arguments(name, &destination, dry_run),
+                            &diagnostics,
+                        )
+                        .await;
+                        assert_eq!(sdk_payload(&result)["roms"], json!(["pacman"]));
+                        assert_mutation_files(&fixture, &destination, name, dry_run);
+                        let scan = sdk_payload(
+                            &sdk_call(&client, "scan_roms", json!({}), &diagnostics).await,
+                        );
+                        if dry_run == Some(false) {
+                            support::assert_rescan(&scan["roms"], true);
+                        } else {
+                            support::assert_initial_scan(&scan["roms"], true);
+                        }
+                    }
+                }
+            }
+            tokio::time::timeout(Duration::from_secs(5), client.close())
+                .await
+                .unwrap()
+                .unwrap();
+            let status = tokio::time::timeout(Duration::from_secs(5), child.0.wait())
+                .await
+                .expect("stdio shutdown timed out")
+                .unwrap();
+            assert!(
+                status.success(),
+                "stdio exit: {status}\nstderr: {}",
+                fs::read_to_string(&diagnostics).unwrap()
+            );
         }
     })
     .await
     .expect("stdio SDK interoperability timed out");
+}
+
+#[tokio::test]
+async fn stdio_process_guard_reaps_the_server_before_removing_test_files() {
+    let fixture = FlowFixture::new();
+    let diagnostics = fixture.directory.path().join("guard-stderr.txt");
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_arcadejanitor-mcp"));
+    for name in support::inherited_application_settings() {
+        command.env_remove(name);
+    }
+    command
+        .args(["--transport", "stdio", "--rom-folder"])
+        .arg(&fixture.roms)
+        .arg("--mame-xml")
+        .arg(&fixture.mame_xml)
+        .arg("--catver")
+        .arg(&fixture.catver)
+        .envs(support::environment(fixture.directory.path()))
+        .current_dir(fixture.directory.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(File::create(&diagnostics).unwrap())
+        .kill_on_drop(true);
+    let mut server = StdioProcess(command.spawn().unwrap());
+    let transport = (
+        server.0.stdout.take().unwrap(),
+        server.0.stdin.take().unwrap(),
+    );
+    let client = match tokio::time::timeout(Duration::from_secs(10), ().serve(transport)).await {
+        Ok(Ok(client)) => client,
+        Ok(Err(error)) => panic!("stdio guard initialization failed: {error}"),
+        Err(error) => panic!("stdio guard initialization timed out: {error}"),
+    };
+    assert!(server.0.try_wait().unwrap().is_none());
+    server.stop_and_reap();
+    assert!(
+        server.0.try_wait().unwrap().is_some(),
+        "stdio child was not reaped"
+    );
+    drop(server);
+    drop(client);
+    fixture
+        .directory
+        .close()
+        .expect("stdio test files were not released after cleanup");
+}
+
+fn read_requests() -> Vec<(&'static str, Value)> {
+    vec![
+        ("scan_roms", json!({})),
+        ("query_metadata", json!({"name": "PACMAN"})),
+        (
+            "filter_roms",
+            json!({"options": {"categories": ["Maze"], "only_available": false}}),
+        ),
+        (
+            "filter_mame_metadata",
+            json!({"options": {"categories": ["Maze"], "only_available": true}}),
+        ),
+        ("list_catver", json!({"list": "categories"})),
+        ("generate_report", json!({})),
+    ]
+}
+
+fn assert_read_payload(name: &str, payload: &Value) {
+    assert_eq!(payload["ok"], true);
+    match name {
+        "scan_roms" => support::assert_initial_scan(&payload["roms"], true),
+        "query_metadata" => {
+            assert_eq!(payload["rom"]["name"], "pacman");
+            assert!(
+                payload["rom"]["rom_path"].is_null(),
+                "metadata query is catalog-only"
+            );
+            assert_eq!(payload["rom"]["metadata"]["region"], "Usa");
+            let mut expected = support::expected_collection()[2].clone();
+            expected["available"] = json!(false);
+            assert_eq!(
+                support::normalize_roms(&json!([payload["rom"]]), true),
+                json!([expected])
+            );
+        }
+        "filter_roms" => {
+            assert_eq!(support::names(&payload["roms"]), ["pacman"]);
+            assert_eq!(
+                support::normalize_roms(&payload["roms"], true),
+                json!([support::expected_collection()[2]])
+            );
+        }
+        "filter_mame_metadata" => {
+            assert_eq!(support::names(&payload["roms"]), ["pacman", "missing"]);
+            let expected = support::expected_collection();
+            let mut rows = json!([expected[1], expected[2]]);
+            for row in rows.as_array_mut().unwrap() {
+                row["available"] = json!(false);
+            }
+            assert_eq!(support::normalize_roms(&payload["roms"], true), rows);
+        }
+        "list_catver" => {
+            assert_eq!(payload["list"], "categories");
+            assert_eq!(payload["total"], 2);
+            assert_eq!(
+                support::normalize_categories(&payload["entries"], true),
+                support::expected_categories()
+            );
+        }
+        "generate_report" => assert_eq!(
+            payload["report"],
+            json!({"total": 4, "available": 3, "by_genre": {"Maze": 2, "Shooter": 1, "Unknown": 1}})
+        ),
+        _ => panic!("unhandled read case {name}"),
+    }
+}
+
+fn http_payload(response: &Value) -> Value {
+    assert!(response["error"].is_null(), "{response}");
+    assert_ne!(response["result"]["isError"], true, "{response}");
+    serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+fn sdk_payload(response: &rmcp::model::CallToolResult) -> Value {
+    assert_ne!(response.is_error, Some(true), "{response:?}");
+    serde_json::from_str(&response.content[0].as_text().unwrap().text).unwrap()
+}
+
+async fn sdk_call(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    name: &str,
+    arguments: Value,
+    diagnostics: &Path,
+) -> rmcp::model::CallToolResult {
+    let request = CallToolRequestParams::new(name.to_string())
+        .with_arguments(arguments.as_object().unwrap().clone());
+    tokio::time::timeout(Duration::from_secs(5), client.call_tool(request))
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "SDK {name} timed out: {error}\nstderr: {}",
+                fs::read_to_string(diagnostics).unwrap()
+            )
+        })
+        .unwrap_or_else(|error| {
+            panic!(
+                "SDK {name} failed: {error}\nstderr: {}",
+                fs::read_to_string(diagnostics).unwrap()
+            )
+        })
+}
+
+fn mutation_arguments(name: &str, destination: &Path, dry_run: Option<bool>) -> Value {
+    let mut arguments = json!({"filter": {"options": {"names": ["pacman"]}}});
+    if name == "move_roms" {
+        arguments["target_folder"] = json!(destination);
+    }
+    if let Some(dry_run) = dry_run {
+        arguments["dry_run"] = json!(dry_run);
+    }
+    arguments
+}
+
+fn assert_collision_bytes(fixture: &FlowFixture, destination: &Path) {
+    assert_eq!(
+        fs::read(fixture.roms.join("pacman.zip")).unwrap(),
+        PACMAN_BYTES
+    );
+    assert_eq!(
+        fs::read(destination.join("pacman.zip")).unwrap(),
+        b"collision bytes"
+    );
+    fixture.assert_unrelated_files();
+}
+
+fn assert_mutation_files(
+    fixture: &FlowFixture,
+    destination: &Path,
+    name: &str,
+    dry_run: Option<bool>,
+) {
+    if dry_run == Some(false) {
+        assert!(!fixture.roms.join("pacman.zip").exists());
+        if name == "move_roms" {
+            assert_eq!(
+                fs::read(destination.join("pacman.zip")).unwrap(),
+                PACMAN_BYTES
+            );
+            assert_eq!(
+                fs::read(destination.join("notes.txt")).unwrap(),
+                support::NOTE_BYTES
+            );
+            assert_eq!(fs::read_dir(destination).unwrap().count(), 2);
+        } else {
+            assert!(!destination.exists());
+        }
+    } else {
+        assert_eq!(
+            fs::read(fixture.roms.join("pacman.zip")).unwrap(),
+            PACMAN_BYTES
+        );
+        assert!(!destination.exists());
+    }
+    fixture.assert_unrelated_files();
+}
+
+#[test]
+fn populated_http_flows_preview_execute_rescan_and_reject_collisions() {
+    let fixture = FlowFixture::new();
+    let port = free_port();
+    let mut server = start_server_with_token(
+        port,
+        &fixture.roms,
+        &fixture.mame_xml,
+        &fixture.catver,
+        Some("test-token"),
+    );
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .no_proxy()
+        .build()
+        .unwrap();
+    let url = format!("http://127.0.0.1:{port}");
+    wait_for_server(&mut server, &client, &url);
+    for (name, arguments) in read_requests() {
+        assert_read_payload(
+            name,
+            &http_payload(&http_call(&client, &url, name, arguments, None)),
+        );
+    }
+    let unknown = http_call(
+        &client,
+        &url,
+        "query_metadata",
+        json!({"name": "absent"}),
+        None,
+    );
+    assert_eq!(unknown["result"]["isError"], true);
+    assert!(
+        unknown["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("was not found")
+    );
+    for name in ["move_roms", "delete_roms"] {
+        fs::write(fixture.roms.join("pacman.zip"), PACMAN_BYTES).unwrap();
+        let destination = fixture.directory.path().join(format!("http-{name}"));
+        if name == "move_roms" {
+            fs::create_dir(&destination).unwrap();
+            fs::write(destination.join("pacman.zip"), b"collision bytes").unwrap();
+            for dry_run in [true, false] {
+                let response = http_call(
+                    &client,
+                    &url,
+                    name,
+                    mutation_arguments(name, &destination, Some(dry_run)),
+                    Some("test-token"),
+                );
+                assert_eq!(response["result"]["isError"], true);
+                assert!(
+                    response["result"]["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("pacman.zip")
+                );
+                assert_collision_bytes(&fixture, &destination);
+            }
+            fs::remove_file(destination.join("pacman.zip")).unwrap();
+            fs::remove_dir(&destination).unwrap();
+        }
+        for dry_run in [None, Some(true), Some(false)] {
+            if name == "move_roms" && dry_run == Some(false) {
+                fs::create_dir(&destination).unwrap();
+                fs::write(destination.join("notes.txt"), support::NOTE_BYTES).unwrap();
+            }
+            let payload = http_payload(&http_call(
+                &client,
+                &url,
+                name,
+                mutation_arguments(name, &destination, dry_run),
+                Some("test-token"),
+            ));
+            assert_eq!(payload["roms"], json!(["pacman"]));
+            assert_mutation_files(&fixture, &destination, name, dry_run);
+            let scan = http_payload(&call_tool(&client, &url, "scan_roms", json!({})));
+            if dry_run == Some(false) {
+                support::assert_rescan(&scan["roms"], true);
+            } else {
+                support::assert_initial_scan(&scan["roms"], true);
+            }
+        }
+    }
+}
+
+#[test]
+fn readiness_reports_early_exit_and_rejects_unsuccessful_health_responses() {
+    let fixture = FlowFixture::new();
+    let client = Client::builder()
+        .timeout(Duration::from_millis(100))
+        .no_proxy()
+        .build()
+        .unwrap();
+    let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = occupied.local_addr().unwrap().port();
+    let mut failed = start_server(port, &fixture.roms, &fixture.mame_xml, &fixture.catver);
+    let error = readiness(
+        &mut failed,
+        &client,
+        &format!("http://127.0.0.1:{port}"),
+        Duration::from_secs(5),
+    )
+    .unwrap_err();
+    assert!(error.contains("exited before readiness"), "{error}");
+    assert!(error.contains("Error:"), "{error}");
+    drop(failed);
+    drop(occupied);
+    let port = free_port();
+    let url = format!("http://127.0.0.1:{port}");
+    let mut server = start_server(port, &fixture.roms, &fixture.mame_xml, &fixture.catver);
+    wait_for_server(&mut server, &client, &url);
+    let start = Instant::now();
+    let error = readiness(
+        &mut server,
+        &client,
+        &format!("{url}/invalid"),
+        Duration::from_millis(150),
+    )
+    .unwrap_err();
+    assert!(error.contains("404"), "{error}");
+    assert!(error.contains("did not become ready"), "{error}");
+    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(server.child.try_wait().unwrap().is_none());
+    drop(server);
+    let address = format!("127.0.0.1:{port}").parse().unwrap();
+    assert!(TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_err());
 }

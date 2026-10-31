@@ -45,10 +45,62 @@ cargo test -p arcadejanitor-cli --test cli
 cargo test -p arcadejanitor-mcp --test http_integration
 ```
 
-The CLI test launches the compiled binary and verifies JSON output. The MCP
-tests check stateless HTTP calls, WebSocket messages, authorization, and stdio
-access from the official SDK client. Server diagnostics go to stderr; stdout
-contains only data or stdio protocol messages.
+The CLI tests launch the compiled binary and parse JSON output. The MCP tests
+check stateless HTTP calls, WebSocket messages, authorization, and populated
+stdio flows through the official SDK client. Server diagnostics go to stderr;
+stdout contains only data or stdio protocol messages.
+
+Shared test support in `tests/support/` creates known available ROMs, a missing
+ROM, an unmatched archive, and an unrelated text file. Both suites compare
+normalized JSON records against the same exact expected metadata and
+availability states. They also check filters, categories, and report counts.
+CLI statistics count unmatched archives separately; MCP reports include them
+in the available count. The tests preserve this difference.
+
+Move and delete tests check default preview, explicit execution, and a fresh
+scan. They compare archive bytes and check that unrelated files remain intact.
+Collision tests preserve source and destination bytes. Authorization tests
+attempt destructive calls against populated folders. CLI tests also check
+`rom show`, audit findings, and audit exit codes at both failure thresholds.
+
+Each child gets a temporary working directory and managed cache through
+`ARCADEJANITOR_CACHE_DIR`. Tests remove inherited application settings and set
+temporary home, configuration, and cache paths. The explicit managed cache
+setting is required on Windows because its system cache lookup does not use
+`LOCALAPPDATA` from the child environment. Tests do not change the test runner's
+global environment.
+
+The CLI metadata test compiles `tests/support/fake_mame.rs` with `rustc`. This
+small native executable checks `-listxml`, records calls, and returns fixed
+metadata or controlled failures. Tests check extraction, successful refresh,
+cache reuse, failed-refresh preservation, and scoped cache-clear preview and
+execution. No MAME installation is needed. Core download tests use bounded
+local HTTP servers and disable proxy use in the test client. They check cache
+replacement and preservation after HTTP or content errors.
+
+CLI commands have a 15-second limit. The fake MAME compile has a 60-second
+limit. MCP startup has a 10-second limit and requires both a successful health
+status and the expected body. SDK calls, WebSocket reads/writes, and stdio
+shutdown have 5-second limits. Captured diagnostics explain early server exits;
+process guards stop and reap children after failures.
+
+Run the focused metadata tests with:
+
+```powershell
+cargo test -p arcadejanitor-core metadata::tests
+```
+
+The existing CI workflow runs these tests through `cargo test --workspace`
+and runs both process suites in its Linux, macOS, and Windows matrix. No tests
+require network access outside the machine.
+
+On Windows, use the Visual C++ wrapper if the current terminal has not loaded
+the developer environment:
+
+```powershell
+& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-cli', '--test', 'cli')
+& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-mcp', '--test', 'http_integration')
+```
 
 ## Documentation site
 

@@ -5,6 +5,11 @@ startup through `--rom-folder` or `ARCADEJANITOR_MAME_ROM_FOLDER`. MCP tools do
 not accept a ROM folder or metadata-source paths, which keeps an agent bound to
 the intended collection.
 
+Set `ARCADEJANITOR_CACHE_DIR` in the server environment to use a different
+managed metadata cache directory. It contains `mame.xml` and `catver.ini`
+directly. The default remains the system cache folder. This setting is not
+an MCP tool argument and does not change explicit metadata paths.
+
 The server accepts `--mame-xml`, `--mame-executable`, and `--catver`, with the
 same environment-variable equivalents as the [CLI](./installation.md#metadata-sources).
 

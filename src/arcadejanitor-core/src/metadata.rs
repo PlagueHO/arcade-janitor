@@ -73,10 +73,7 @@ pub fn resolve_mame_xml(
         });
     }
 
-    let cache_path = dirs_next::cache_dir()
-        .ok_or(ArcadeJanitorError::CacheDirectoryUnavailable)?
-        .join("arcadejanitor")
-        .join("mame.xml");
+    let cache_path = managed_cache_paths()?.mame_xml;
     if let Some(executable) = executable {
         extract_mame_xml(executable, &cache_path)?;
         Ok(ResolvedMameXml {
@@ -157,9 +154,12 @@ pub fn refresh_catver() -> Result<ResolvedCatver> {
 }
 
 pub fn managed_cache_paths() -> Result<ManagedCachePaths> {
-    let directory = dirs_next::cache_dir()
-        .ok_or(ArcadeJanitorError::CacheDirectoryUnavailable)?
-        .join("arcadejanitor");
+    let directory = match std::env::var_os("ARCADEJANITOR_CACHE_DIR") {
+        Some(path) if !path.is_empty() => PathBuf::from(path),
+        _ => dirs_next::cache_dir()
+            .ok_or(ArcadeJanitorError::CacheDirectoryUnavailable)?
+            .join("arcadejanitor"),
+    };
     Ok(ManagedCachePaths {
         mame_xml: directory.join("mame.xml"),
         catver: directory.join("catver.ini"),
@@ -223,7 +223,23 @@ fn download_catver(cached_path: &Path) -> Result<()> {
 }
 
 fn download_catver_from(cached_path: &Path, url: &str) -> Result<()> {
-    let response = reqwest::blocking::get(url)
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .map_err(|source| ArcadeJanitorError::CatverDownload {
+            url: url.to_string(),
+            source,
+        })?;
+    download_catver_using(cached_path, url, &client)
+}
+
+fn download_catver_using(
+    cached_path: &Path,
+    url: &str,
+    client: &reqwest::blocking::Client,
+) -> Result<()> {
+    let response = client
+        .get(url)
+        .send()
         .and_then(reqwest::blocking::Response::error_for_status)
         .map_err(|source| ArcadeJanitorError::CatverDownload {
             url: url.to_string(),
@@ -276,10 +292,99 @@ mod tests {
         fs,
         io::{Read, Write},
         net::TcpListener,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
         thread,
+        time::{Duration, Instant},
     };
 
     use super::*;
+
+    struct LocalHttpServer {
+        url: String,
+        stop: Arc<AtomicBool>,
+        thread: Option<thread::JoinHandle<()>>,
+    }
+
+    impl LocalHttpServer {
+        fn new(status: &str, body: &[u8]) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let status = status.to_string();
+            let body = body.to_vec();
+            let stop = Arc::new(AtomicBool::new(false));
+            let server_stop = Arc::clone(&stop);
+            let thread = thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while Instant::now() < deadline && !server_stop.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false).unwrap();
+                            stream
+                                .set_read_timeout(Some(Duration::from_secs(2)))
+                                .unwrap();
+                            stream
+                                .set_write_timeout(Some(Duration::from_secs(2)))
+                                .unwrap();
+                            let mut request = Vec::new();
+                            while !request.ends_with(b"\r\n\r\n") {
+                                let mut byte = [0];
+                                assert_eq!(stream.read(&mut byte).unwrap(), 1);
+                                request.push(byte[0]);
+                                assert!(request.len() < 8192, "oversized HTTP request");
+                            }
+                            assert!(request.starts_with(b"GET / HTTP/1.1\r\n"));
+                            write!(stream,
+                                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()).unwrap();
+                            stream.write_all(&body).unwrap();
+                            return;
+                        }
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("local HTTP accept failed: {error}"),
+                    }
+                }
+            });
+            Self {
+                url,
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn finish(mut self) {
+            self.thread
+                .take()
+                .unwrap()
+                .join()
+                .expect("local HTTP server failed");
+        }
+
+        fn download(&self, cached_path: &Path) -> Result<()> {
+            let client = reqwest::blocking::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .unwrap();
+            download_catver_using(cached_path, &self.url, &client)
+        }
+    }
+
+    impl Drop for LocalHttpServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.thread.take()
+                && thread.join().is_err()
+            {
+                eprintln!("local HTTP server failed during cleanup");
+            }
+        }
+    }
 
     #[test]
     fn prefers_an_explicit_catver_path() {
@@ -311,128 +416,125 @@ mod tests {
 
     #[test]
     fn reuses_an_existing_cached_mame_xml() {
-        let directory =
-            std::env::temp_dir().join(format!("arcadejanitor-mame-test-{}", std::process::id()));
-        fs::create_dir_all(&directory).unwrap();
-        let cached_path = directory.join("mame.xml");
+        let directory = tempfile::tempdir().unwrap();
+        let cached_path = directory.path().join("mame.xml");
         fs::write(&cached_path, "<mame/>").unwrap();
 
         assert_eq!(
             resolve_mame_xml_path_in_cache(&cached_path).unwrap(),
             cached_path
         );
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn reuses_an_existing_cached_catver() {
-        let directory =
-            std::env::temp_dir().join(format!("arcadejanitor-catver-test-{}", std::process::id()));
-        fs::create_dir_all(&directory).unwrap();
-        let cached_path = directory.join("catver.ini");
+        let directory = tempfile::tempdir().unwrap();
+        let cached_path = directory.path().join("catver.ini");
         fs::write(&cached_path, "[Category]\npacman=Maze / Chase\n").unwrap();
 
         assert_eq!(
             resolve_catver_in_cache(None, &cached_path).unwrap().source,
             CatverSource::Cache
         );
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn downloads_and_validates_catver_before_caching() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0; 1024];
-            let bytes_read = stream.read(&mut request).unwrap();
-            assert!(
-                std::str::from_utf8(&request[..bytes_read])
-                    .unwrap()
-                    .starts_with("GET / HTTP/1.1")
-            );
-
-            let body = "[Category]\npacman=Maze / Chase\n";
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .unwrap();
-        });
-        let directory = std::env::temp_dir().join(format!(
-            "arcadejanitor-catver-download-test-{}",
-            std::process::id()
-        ));
-        let cached_path = directory.join("catver.ini");
-
-        download_catver_from(&cached_path, &url).unwrap();
+        let body = b"[Category]\npacman=Maze / Chase\n";
+        let server = LocalHttpServer::new("200 OK", body);
+        let directory = tempfile::tempdir().unwrap();
+        let cached_path = directory.path().join("catver.ini");
+        server.download(&cached_path).unwrap();
 
         assert_eq!(
             fs::read_to_string(&cached_path).unwrap(),
             "[Category]\npacman=Maze / Chase\n"
         );
-        server.join().unwrap();
-        fs::remove_dir_all(directory).unwrap();
+        server.finish();
+        fs::write(&cached_path, "[Category]\nold=Old\n").unwrap();
+        let server = LocalHttpServer::new("200 OK", body);
+        server.download(&cached_path).unwrap();
+        assert_eq!(fs::read(&cached_path).unwrap(), body);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        server.finish();
     }
 
     #[test]
     fn replaces_an_existing_cache_file() {
-        let directory = std::env::temp_dir().join(format!(
-            "arcadejanitor-cache-replace-test-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        let cached_path = directory.join("mame.xml");
+        let directory = tempfile::tempdir().unwrap();
+        let cached_path = directory.path().join("mame.xml");
         fs::write(&cached_path, "old").unwrap();
 
         cache_mame_xml(&cached_path, "<mame/>").unwrap();
 
         assert_eq!(fs::read_to_string(&cached_path).unwrap(), "<mame/>");
         assert_eq!(
-            fs::read_dir(&directory).unwrap().count(),
+            fs::read_dir(directory.path()).unwrap().count(),
             1,
             "temporary or backup files were not cleaned up"
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn rejects_invalid_downloaded_catver_without_caching_it() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0; 1024];
-            let _ = stream.read(&mut request).unwrap();
-            let body = "[Category]\n";
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .unwrap();
-        });
+        let server = LocalHttpServer::new("200 OK", b"[Category]\n");
         let directory = tempfile::tempdir().unwrap();
         let cached_path = directory.path().join("catver.ini");
 
         assert!(matches!(
-            download_catver_from(&cached_path, &url),
+            server.download(&cached_path),
             Err(ArcadeJanitorError::InvalidCatverDownload)
         ));
         assert!(!cached_path.exists());
-        server.join().unwrap();
+        server.finish();
     }
 
     #[test]
     fn reports_download_failures() {
+        let server = LocalHttpServer::new("503 Service Unavailable", b"retry later");
         let directory = tempfile::tempdir().unwrap();
         let cached_path = directory.path().join("catver.ini");
 
-        let error = download_catver_from(&cached_path, "http://127.0.0.1:1").unwrap_err();
+        let error = server.download(&cached_path).unwrap_err();
         assert!(matches!(error, ArcadeJanitorError::CatverDownload { .. }));
+        assert!(!cached_path.exists());
+        server.finish();
+    }
+
+    #[test]
+    fn failed_catver_refresh_preserves_the_existing_cache() {
+        for (status, body) in [
+            ("503 Service Unavailable", b"retry later".as_slice()),
+            ("200 OK", b"[Category]\n".as_slice()),
+            ("200 OK", b"\xff".as_slice()),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let cached_path = directory.path().join("catver.ini");
+            let original = b"[Category]\npacman=Maze / Chase\n";
+            fs::write(&cached_path, original).unwrap();
+            fs::write(directory.path().join("notes.txt"), b"preserve me").unwrap();
+            let server = LocalHttpServer::new(status, body);
+            let error = server.download(&cached_path).unwrap_err();
+            match status {
+                "503 Service Unavailable" => {
+                    assert!(matches!(error, ArcadeJanitorError::CatverDownload { .. }))
+                }
+                _ if body == b"\xff" => {
+                    assert!(matches!(error, ArcadeJanitorError::CatverEncoding(_)))
+                }
+                _ => assert!(matches!(error, ArcadeJanitorError::InvalidCatverDownload)),
+            }
+            assert_eq!(fs::read(&cached_path).unwrap(), original);
+            assert_eq!(
+                resolve_catver_in_cache(None, &cached_path).unwrap().source,
+                CatverSource::Cache
+            );
+            assert_eq!(
+                fs::read(directory.path().join("notes.txt")).unwrap(),
+                b"preserve me"
+            );
+            assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+            server.finish();
+        }
     }
 }
