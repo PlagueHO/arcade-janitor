@@ -15,6 +15,10 @@ use serde_json::{Value, json};
 #[path = "../../../tests/support/mod.rs"]
 mod support;
 
+#[cfg(windows)]
+#[path = "support/windows_job.rs"]
+mod windows_job;
+
 const PACKAGE_DIR: &str = "ARCADEJANITOR_RELEASE_PACKAGE_DIR";
 const COMMAND_WAIT: Duration = Duration::from_secs(15);
 const STARTUP_WAIT: Duration = Duration::from_secs(10);
@@ -74,6 +78,8 @@ impl Package {
 
 struct Process {
     child: Child,
+    #[cfg(windows)]
+    job: windows_job::Job,
     label: String,
     stdout: PathBuf,
     stderr: PathBuf,
@@ -93,9 +99,15 @@ impl Process {
             command.process_group(0);
         }
         let label = format!("{label}: {command:?}");
+        #[cfg(windows)]
+        let (child, job) =
+            windows_job::Job::spawn(&mut command).with_context(|| format!("start {label}"))?;
+        #[cfg(unix)]
         let child = command.spawn().with_context(|| format!("start {label}"))?;
         Ok(Self {
             child,
+            #[cfg(windows)]
+            job,
             label,
             stdout,
             stderr,
@@ -119,7 +131,7 @@ impl Process {
 
     fn output(mut self) -> Result<String> {
         let status = wait(&mut self.child, COMMAND_WAIT).with_context(|| self.diagnostics())?;
-        self.stopped = true;
+        self.stop()?;
         ensure!(status.success(), "exit {status}\n{}", self.diagnostics());
         fs::read_to_string(&self.stdout).context("read command output")
     }
@@ -128,7 +140,10 @@ impl Process {
         if self.stopped {
             return Ok(());
         }
-        if self.child.try_wait()?.is_none() {
+        #[cfg(windows)]
+        self.job.stop(CLEANUP_WAIT)?;
+        #[cfg(unix)]
+        {
             let mut command = tree_termination(self.child.id());
             let log = self.stderr.with_extension("cleanup.txt");
             command
@@ -174,17 +189,10 @@ impl Drop for Process {
     }
 }
 
-#[cfg(windows)]
-fn tree_termination(pid: u32) -> Command {
-    let mut command = Command::new("taskkill.exe");
-    command.args(["/PID", &pid.to_string(), "/T", "/F"]);
-    command
-}
-
 #[cfg(unix)]
 fn tree_termination(pid: u32) -> Command {
     let mut command = Command::new("/bin/kill");
-    command.args(["-KILL", &format!("-{pid}")]);
+    command.args(["-KILL", "--", &format!("-{pid}")]);
     command
 }
 
@@ -434,7 +442,7 @@ fn rejects_missing_package_executables() -> Result<()> {
     Ok(())
 }
 
-fn start_process_fixture(root: &Path) -> Result<(Process, SocketAddr)> {
+fn start_process_fixture(root: &Path, exit_launcher: bool) -> Result<(Process, SocketAddr)> {
     let address = TcpListener::bind("127.0.0.1:0")?.local_addr()?;
     let mut command = Command::new(std::env::current_exe()?);
     command
@@ -446,12 +454,16 @@ fn start_process_fixture(root: &Path) -> Result<(Process, SocketAddr)> {
         ])
         .env("ARCADEJANITOR_PACKAGE_HELPER_ROOT", root)
         .env("ARCADEJANITOR_PACKAGE_HELPER_ADDR", address.to_string())
+        .env(
+            "ARCADEJANITOR_PACKAGE_HELPER_EXIT",
+            if exit_launcher { "1" } else { "0" },
+        )
         .env_remove("ARCADEJANITOR_PACKAGE_HELPER_CHILD");
     let mut process = Process::start(command, root, "process-tree-fixture")?;
     let deadline = Instant::now() + STARTUP_WAIT;
     while !root.join("ready").is_file() {
         ensure!(
-            process.child.try_wait()?.is_none() && Instant::now() < deadline,
+            (exit_launcher || process.child.try_wait()?.is_none()) && Instant::now() < deadline,
             "process-tree fixture did not start\n{}",
             process.diagnostics()
         );
@@ -465,7 +477,7 @@ fn readiness_retries_incomplete_health_responses() -> Result<()> {
     use std::io::{BufRead, BufReader, Write};
 
     let directory = tempfile::tempdir()?;
-    let (mut process, process_address) = start_process_fixture(directory.path())?;
+    let (mut process, process_address) = start_process_fixture(directory.path(), false)?;
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let url = format!("http://{}", listener.local_addr()?);
     listener.set_nonblocking(true)?;
@@ -518,7 +530,7 @@ fn readiness_retries_incomplete_health_responses() -> Result<()> {
 fn timeout_and_unwinding_stop_the_process_tree() -> Result<()> {
     for unwind in [false, true] {
         let directory = tempfile::tempdir()?;
-        let (mut process, address) = start_process_fixture(directory.path())?;
+        let (mut process, address) = start_process_fixture(directory.path(), false)?;
         let error = wait(&mut process.child, Duration::from_millis(50))
             .expect_err("fixture must remain running until cleanup");
         ensure!(error.to_string().contains("exceeded"), "{error:#}");
@@ -540,12 +552,48 @@ fn timeout_and_unwinding_stop_the_process_tree() -> Result<()> {
 }
 
 #[test]
-#[ignore = "subprocess fixture for timeout_and_unwinding_stop_the_process_tree"]
+fn exited_launcher_cleanup_stops_descendants() -> Result<()> {
+    for cleanup in ["stop", "drop", "output"] {
+        let directory = tempfile::tempdir()?;
+        let (mut process, address) = start_process_fixture(directory.path(), true)?;
+        ensure!(
+            wait(&mut process.child, STARTUP_WAIT)?.success(),
+            "launcher failed"
+        );
+        ensure!(
+            TcpStream::connect(address).is_ok(),
+            "descendant must outlive launcher"
+        );
+        let client = Client::builder().no_proxy().timeout(REQUEST_WAIT).build()?;
+        let error = readiness(&mut process, &client, &format!("http://{address}"))
+            .expect_err("readiness must detect the exited launcher");
+        ensure!(error.to_string().contains("launcher exited"), "{error:#}");
+        match cleanup {
+            "stop" => {
+                process.stop()?;
+                process.stop()?;
+            }
+            "drop" => drop(process),
+            "output" => {
+                process.output()?;
+            }
+            _ => unreachable!(),
+        }
+        assert_closed(address)?;
+        directory
+            .close()
+            .context("remove exited-launcher fixture files")?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "subprocess fixture for process-tree cleanup tests"]
 fn process_tree_fixture() -> Result<()> {
     let root = std::env::var_os("ARCADEJANITOR_PACKAGE_HELPER_ROOT")
         .context("process-tree fixture requires a test-owned root")?;
     if std::env::var_os("ARCADEJANITOR_PACKAGE_HELPER_CHILD").is_none() {
-        let status = Command::new(std::env::current_exe()?)
+        let mut child = Command::new(std::env::current_exe()?)
             .args([
                 "--ignored",
                 "--exact",
@@ -553,7 +601,16 @@ fn process_tree_fixture() -> Result<()> {
                 "--nocapture",
             ])
             .env("ARCADEJANITOR_PACKAGE_HELPER_CHILD", "1")
-            .status()?;
+            .spawn()?;
+        if std::env::var("ARCADEJANITOR_PACKAGE_HELPER_EXIT")?.as_str() == "1" {
+            let deadline = Instant::now() + STARTUP_WAIT;
+            while !Path::new(&root).join("ready").is_file() {
+                ensure!(Instant::now() < deadline, "fixture child did not start");
+                thread::sleep(Duration::from_millis(20));
+            }
+            return Ok(());
+        }
+        let status = child.wait()?;
         ensure!(status.success(), "fixture child exited {status}");
         bail!("fixture child exited before process-tree cleanup");
     }

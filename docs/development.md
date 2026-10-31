@@ -186,9 +186,17 @@ a 15-minute outer limit.
 The process guard stops the CLI and its server child before removing files.
 It uses a separate
 [Unix process group](https://doc.rust-lang.org/std/os/unix/process/trait.CommandExt.html#tymethod.process_group)
-or Windows
-[`taskkill /PID ... /T /F`](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill).
-Only the test process tree is stopped. The package test checks cleanup after
+or a Windows
+[job object](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+The Windows-only `windows-sys` development dependency supplies the job APIs.
+The launcher starts suspended, joins the job, and then resumes. This prevents
+children from starting before the job owns them. Closing the job also stops
+remaining children if cleanup fails. Unix cleanup uses
+[`/bin/kill -KILL -- -PGID`](https://man7.org/linux/man-pages/man1/kill.1.html)
+to keep the negative process group ID separate from options.
+Only the test process tree is stopped, even after the launcher exits.
+Regression tests check explicit cleanup, guard drop, and output collection
+after launcher exit. The package test checks cleanup after
 both a successful tool call and an induced failure after startup. It checks
 that the listener is closed. Failures include captured process diagnostics.
 Workflow cleanup removes the extracted package even when the test fails.

@@ -23,3 +23,6 @@ reqwest = { workspace = true, features = ["json"] }
 rmcp = { workspace = true, features = ["client"] }
 tempfile = "3.26.0"
 tokio-tungstenite = "0.29.0"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }

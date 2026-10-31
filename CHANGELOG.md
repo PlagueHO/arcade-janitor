@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed release-test process cleanup on Linux and stopped server children after
+  launcher exit on Unix and Windows.
 - Fixed test isolation for mixed-case Windows environment settings and made
   stdio test cleanup wait for the server process after a failure.
 - Fixed parameterless MCP tool calls when clients omit the optional arguments field.
