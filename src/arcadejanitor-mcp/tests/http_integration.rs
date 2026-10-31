@@ -3,12 +3,20 @@ use std::{
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
 use reqwest::blocking::Client;
-use rmcp::{ServiceExt, model::CallToolRequestParams};
+use rmcp::{
+    ServiceExt,
+    model::{CallToolRequestParams, ProtocolVersion},
+    service::{ClientLifecycleMode, ClientServiceExt},
+    transport::{
+        StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
+    },
+};
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
 
@@ -189,6 +197,377 @@ fn free_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
+}
+
+#[derive(Debug)]
+struct HttpExchange {
+    method: axum::http::Method,
+    headers: axum::http::HeaderMap,
+    request: Value,
+    status: axum::http::StatusCode,
+    response_headers: axum::http::HeaderMap,
+    response: String,
+}
+
+struct HttpObserver {
+    url: String,
+    exchanges: Arc<Mutex<Vec<HttpExchange>>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for HttpObserver {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+impl HttpObserver {
+    async fn start(upstream: &str) -> Self {
+        use axum::{
+            Router,
+            body::Bytes,
+            http::{HeaderMap, Method},
+            routing::any,
+        };
+
+        let exchanges = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&exchanges);
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let upstream = format!("{upstream}/mcp");
+        let app = Router::new().route(
+            "/mcp",
+            any(move |method: Method, headers: HeaderMap, body: Bytes| {
+                let client = client.clone();
+                let upstream = upstream.clone();
+                let recorded = Arc::clone(&recorded);
+                async move {
+                    // Only Host changes for the upstream address; MCP bytes and headers do not.
+                    let mut forwarded_headers = headers.clone();
+                    forwarded_headers.remove(axum::http::header::HOST);
+                    let response = client
+                        .request(method.clone(), upstream)
+                        .headers(forwarded_headers)
+                        .body(body.to_vec())
+                        .send()
+                        .await
+                        .expect("forward SDK HTTP request");
+                    let status = response.status();
+                    let response_headers = response.headers().clone();
+                    let response = response.bytes().await.expect("read upstream response");
+                    recorded.lock().unwrap().push(HttpExchange {
+                        method,
+                        headers,
+                        request: if body.is_empty() {
+                            Value::Null
+                        } else {
+                            serde_json::from_slice(&body).unwrap()
+                        },
+                        status,
+                        response_headers: response_headers.clone(),
+                        response: String::from_utf8(response.to_vec()).unwrap(),
+                    });
+                    (status, response_headers, response)
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve HTTP observer");
+        });
+        Self {
+            url,
+            exchanges,
+            task,
+        }
+    }
+}
+
+fn sdk_http_transport(
+    url: &str,
+    token: Option<&str>,
+) -> StreamableHttpClientTransport<sdk_reqwest::Client> {
+    let client = sdk_reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let mut config = StreamableHttpClientTransportConfig::with_uri(url.to_owned());
+    if let Some(token) = token {
+        config = config.auth_header(token);
+    }
+    StreamableHttpClientTransport::with_client(client, config)
+}
+
+#[test]
+fn sdk_http_client_reads_populated_custom_transport() {
+    let fixture = FlowFixture::new();
+    let port = free_port();
+    let mut server = start_server_with_token(
+        port,
+        &fixture.roms,
+        &fixture.mame_xml,
+        &fixture.catver,
+        Some("test-token"),
+    );
+    let url = format!("http://127.0.0.1:{port}");
+    let client = Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    wait_for_server(&mut server, &client, &url);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            for token in [None, Some("wrong"), Some("test-token")] {
+                let observer = HttpObserver::start(&url).await;
+                let transport = sdk_http_transport(&observer.url, token);
+                let mut sdk = tokio::time::timeout(Duration::from_secs(5), ().serve(transport))
+                    .await
+                    .expect("SDK HTTP initialization timed out")
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "SDK HTTP initialization failed: {error}\nstderr: {}",
+                            server.stderr()
+                        )
+                    });
+                assert_eq!(
+                    sdk.peer_info().unwrap().protocol_version,
+                    ProtocolVersion::V_2024_11_05
+                );
+                let tools = tokio::time::timeout(Duration::from_secs(5), sdk.list_tools(None))
+                    .await
+                    .expect("SDK HTTP tool discovery timed out")
+                    .unwrap();
+                let authorized = token == Some("test-token");
+                assert_eq!(tools.tools.len(), if authorized { 9 } else { 7 });
+                assert!(tools.tools.iter().any(|tool| tool.name == "scan_roms"));
+                for name in ["move_roms", "delete_roms"] {
+                    assert_eq!(tools.tools.iter().any(|tool| tool.name == name), authorized);
+                }
+                let scan = sdk_call(&sdk, "scan_roms", json!({}), &server.diagnostics).await;
+                assert_ne!(scan.is_error, Some(true));
+                support::assert_initial_scan(&sdk_payload(&scan)["roms"], true);
+                if !authorized {
+                    let denied = sdk_call(
+                        &sdk,
+                        "delete_roms",
+                        json!({"filter": {}, "dry_run": false}),
+                        &server.diagnostics,
+                    )
+                    .await;
+                    assert_eq!(denied.is_error, Some(true));
+                    assert!(
+                        denied.content[0]
+                            .as_text()
+                            .unwrap()
+                            .text
+                            .contains("authorization is required")
+                    );
+                }
+                tokio::time::timeout(Duration::from_secs(5), sdk.close())
+                    .await
+                    .expect("SDK HTTP close timed out")
+                    .unwrap();
+
+                let exchanges = observer.exchanges.lock().unwrap();
+                let methods: Vec<_> = exchanges
+                    .iter()
+                    .map(|exchange| exchange.request["method"].as_str().unwrap())
+                    .collect();
+                assert_eq!(
+                    &methods[..4],
+                    [
+                        "initialize",
+                        "notifications/initialized",
+                        "tools/list",
+                        "tools/call"
+                    ]
+                );
+                assert_eq!(methods.len(), if authorized { 4 } else { 5 });
+                assert_eq!(
+                    exchanges[0].request["params"]["protocolVersion"],
+                    "2026-07-28"
+                );
+                let initialized: Value = serde_json::from_str(&exchanges[0].response).unwrap();
+                assert_eq!(initialized["result"]["protocolVersion"], "2024-11-05");
+                for (index, exchange) in exchanges.iter().enumerate() {
+                    assert_eq!(exchange.method, axum::http::Method::POST);
+                    let accept = exchange.headers["accept"].to_str().unwrap();
+                    assert!(accept.contains("application/json"));
+                    assert!(accept.contains("text/event-stream"));
+                    assert_eq!(exchange.headers["content-type"], "application/json");
+                    assert_eq!(
+                        exchange.headers.get("authorization"),
+                        token
+                            .map(|token| format!("Bearer {token}").parse().unwrap())
+                            .as_ref()
+                    );
+                    assert!(exchange.headers.get("mcp-session-id").is_none());
+                    assert!(exchange.response_headers.get("mcp-session-id").is_none());
+                    assert!(exchange.response_headers.get("www-authenticate").is_none());
+                    if index == 0 {
+                        assert!(exchange.headers.get("mcp-protocol-version").is_none());
+                    } else {
+                        assert_eq!(exchange.headers["mcp-protocol-version"], "2024-11-05");
+                    }
+                    if index == 1 {
+                        assert_eq!(exchange.status, 202);
+                        assert!(exchange.response.is_empty());
+                    } else {
+                        assert_eq!(exchange.status, 200);
+                        assert_eq!(
+                            exchange.response_headers["content-type"],
+                            "application/json"
+                        );
+                        let response: Value = serde_json::from_str(&exchange.response).unwrap();
+                        assert_eq!(response["id"], exchange.request["id"]);
+                    }
+                }
+            }
+        })
+        .await
+        .expect("SDK HTTP evaluation exceeded 60 seconds");
+    });
+    assert_eq!(
+        fs::read(fixture.roms.join("pacman.zip")).unwrap(),
+        PACMAN_BYTES
+    );
+    fixture.assert_unrelated_files();
+    drop(server);
+    assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+}
+
+#[test]
+#[ignore = "modern HTTP discovery is unsupported; run explicitly to reproduce the compatibility gap"]
+fn sdk_modern_http_discovery_compatibility() {
+    let fixture = FlowFixture::new();
+    let port = free_port();
+    let mut server = start_server(port, &fixture.roms, &fixture.mame_xml, &fixture.catver);
+    let url = format!("http://127.0.0.1:{port}");
+    let client = Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    wait_for_server(&mut server, &client, &url);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let observer = HttpObserver::start(&url).await;
+        let transport = sdk_http_transport(&observer.url, None);
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            ().serve_with_lifecycle(
+                transport,
+                ClientLifecycleMode::Discover {
+                    preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+                },
+            ),
+        )
+        .await
+        .expect("modern SDK HTTP discovery timed out");
+        let mut sdk = result.unwrap_or_else(|error| {
+            panic!(
+                "modern SDK HTTP discovery failed: {error}\nexchanges: {:#?}\nstderr: {}",
+                observer.exchanges.lock().unwrap(),
+                server.stderr()
+            )
+        });
+        tokio::time::timeout(Duration::from_secs(5), sdk.close())
+            .await
+            .expect("modern SDK HTTP close timed out")
+            .unwrap();
+    });
+}
+
+#[test]
+fn records_custom_http_contract_gaps() {
+    let fixture = FlowFixture::new();
+    let port = free_port();
+    let mut server = start_server(port, &fixture.roms, &fixture.mame_xml, &fixture.catver);
+    let url = format!("http://127.0.0.1:{port}");
+    let client = Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    wait_for_server(&mut server, &client, &url);
+    for method in [reqwest::Method::GET, reqwest::Method::DELETE] {
+        let response = client
+            .request(method.clone(), format!("{url}/mcp"))
+            .header("Accept", "application/json, text/event-stream")
+            .send()
+            .unwrap();
+        assert_eq!(response.status(), 405, "{method}");
+        assert!(response.headers().get("mcp-session-id").is_none());
+    }
+    for (version, method, name, origin) in [
+        ("2026-07-28", "tools/call", "scan_roms", "http://localhost"),
+        ("2024-11-05", "tools/call", "scan_roms", "http://localhost"),
+        ("invalid", "tools/call", "scan_roms", "http://localhost"),
+        ("2026-07-28", "ping", "scan_roms", "http://localhost"),
+        (
+            "2026-07-28",
+            "tools/call",
+            "not-scan-roms",
+            "http://localhost",
+        ),
+        (
+            "2026-07-28",
+            "tools/call",
+            "scan_roms",
+            "https://example.com",
+        ),
+    ] {
+        let response = client
+            .post(format!("{url}/mcp"))
+            .header("MCP-Protocol-Version", version)
+            .header("Origin", origin)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Mcp-Method", method)
+            .header("Mcp-Name", name)
+            .json(&json!({
+                "jsonrpc": "2.0", "id": "metadata", "method": "tools/call",
+                "params": {
+                    "name": "scan_roms", "arguments": {},
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {"name": "evaluation", "version": "1"},
+                        "io.modelcontextprotocol/clientCapabilities": {}
+                    }
+                }
+            }))
+            .send()
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert!(response.headers().get("www-authenticate").is_none());
+        let response: Value = response.json().unwrap();
+        let result: Value =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        support::assert_initial_scan(&result["roms"], true);
+    }
+    for path in [
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+    ] {
+        assert_eq!(
+            client.get(format!("{url}{path}")).send().unwrap().status(),
+            404
+        );
+    }
+    assert_eq!(
+        fs::read(fixture.roms.join("pacman.zip")).unwrap(),
+        PACMAN_BYTES
+    );
+    fixture.assert_unrelated_files();
 }
 
 fn call_tool(client: &Client, url: &str, name: &str, arguments: Value) -> Value {

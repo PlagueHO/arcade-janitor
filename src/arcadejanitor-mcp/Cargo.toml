@@ -20,7 +20,8 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json"] }
-rmcp = { workspace = true, features = ["client"] }
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
+sdk-reqwest = { package = "reqwest", version = "0.13.2", default-features = false }
 tempfile = "3.26.0"
 tokio-tungstenite = "0.29.0"
 

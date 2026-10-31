@@ -87,6 +87,159 @@ status and the expected body. SDK calls, WebSocket reads/writes, and stdio
 shutdown have 5-second limits. Captured diagnostics explain early server exits;
 process guards stop and reap children after failures.
 
+## HTTP client compatibility evaluation
+
+The evaluation for [#31](https://github.com/PlagueHO/arcade-janitor/issues/31)
+preserves production HTTP, WebSocket, and stdio behavior. The endpoint is
+custom stateless HTTP, not a standard Streamable HTTP implementation.
+
+### Versions and official sources
+
+The evaluation uses the official Rust SDK `rmcp` `3.8.0` from `Cargo.lock`.
+It knows protocol revisions `2024-11-05`, `2025-03-26`, `2025-06-18`,
+`2025-11-25`, and `2026-07-28`. Its latest version is `2026-07-28`.
+Its default `ServiceExt::serve` still selects the initialization-based
+lifecycle. Explicit `ClientLifecycleMode::Discover` selects modern discovery.
+See the [official client lifecycle source](https://docs.rs/rmcp/3.8.0/src/rmcp/service/client.rs.html)
+and [HTTP client documentation](https://docs.rs/rmcp/3.8.0/rmcp/transport/streamable_http_client/index.html).
+
+The current official specification checked for this evaluation is
+**`2026-07-28`**:
+
+- [Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
+  requires per-request protocol metadata and standard HTTP headers.
+- [Versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
+  replaces the initialization handshake with per-request version selection.
+- [Authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
+  defines optional OAuth-based HTTP authorization.
+
+Compare these rules with the initialization-based
+[Streamable HTTP revision `2025-11-25`](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+and the advertised
+[`2024-11-05` HTTP+SSE transport](https://modelcontextprotocol.io/specification/2024-11-05/basic/transports).
+Streamable HTTP first appeared in `2025-03-26`; an advertised `2024-11-05`
+version does not identify a standard Streamable HTTP contract.
+
+SSE responses and session IDs are optional in the initialization-era
+Streamable HTTP binding. GET may return HTTP 405 when the server does not
+offer an SSE stream. DELETE may return HTTP 405 for session termination.
+Those responses alone are not compatibility failures. The `2026-07-28`
+revision removed GET streams and protocol-level sessions.
+
+### Measured results
+
+Local execution on Windows produced these results. The normal regression
+is included in the existing Linux, macOS, and Windows CI matrix; this
+evaluation does not claim local execution on all three platforms.
+
+| Check | Observed result | Meaning |
+| --- | --- | --- |
+| Default SDK initialization | Sends `initialize` with `2026-07-28`; accepts the server's `2024-11-05` result | The SDK's default initialization mode works with the custom endpoint. This is not modern version negotiation. |
+| Tool discovery | Seven tools without a valid token; nine with the configured token | Custom token controls work through the official client. |
+| Populated read-only call | `scan_roms` matches the exact shared fixture metadata and availability states | The SDK parses the tool result and returns usable data. |
+| Initialized notification | POST returns HTTP 202 with no body | The initialization-mode notification succeeds. |
+| Request headers | SDK sends both JSON and SSE in Accept and uses JSON Content-Type | The endpoint accepts the SDK's normal request format. |
+| Subsequent version header | SDK sends `MCP-Protocol-Version: 2024-11-05` after initialization | The SDK follows the version returned by this server. |
+| JSON responses | HTTP 200, JSON Content-Type, matching JSON-RPC request IDs | The SDK parses ordinary responses without an adapter. |
+| Session and close | No session ID; default flow sends only POST; client close succeeds | No DELETE or server process termination is expected from a sessionless HTTP client close. |
+| Missing or incorrect bearer token | Read-only calls succeed; destructive tools are hidden; attempted deletion returns a tool error and preserves files | No HTTP authentication challenge is issued. |
+| Correct bearer token | SDK sends the header; destructive tools appear | Execution semantics remain covered by the existing safety tests. |
+| Direct GET and DELETE probes | HTTP 405 | No SSE stream or session endpoint exists. This is not, by itself, a failure. |
+| Modern SDK discovery | HTTP 200 with JSON-RPC `-32601: method not found` | `2026-07-28` discovery fails. Later modern SDK operations are blocked, not passed. |
+| Unsupported or invalid version header | Read-only call still succeeds | The server ignores version headers instead of rejecting unsupported versions. |
+| Inconsistent modern metadata | A body/header version mismatch, incorrect `Mcp-Method`, and incorrect `Mcp-Name` each still succeed | Required modern metadata validation is absent. |
+| Untrusted HTTP Origin | Read-only call still succeeds | Standard HTTP Origin rejection is absent. Existing WebSocket Origin checks are unchanged. |
+| OAuth discovery | Protected-resource metadata probes return HTTP 404; tool responses have no challenge | The custom token control is not OAuth interoperability. No live authorization service was used. |
+
+The working SDK flow is **limited client interoperability**, not protocol
+compliance. Modern discovery failure, ignored version and method metadata,
+and missing HTTP Origin validation prevent a current Streamable HTTP claim.
+The endpoint also does not provide the SSE endpoint required by its
+advertised `2024-11-05` standard HTTP transport.
+
+### Reproduce the evaluation
+
+`sdk_http_client_reads_populated_custom_transport` runs in normal CI.
+It uses the existing server process guard and populated `FlowFixture`.
+A test-only HTTP observer forwards MCP body bytes and headers unchanged;
+only Host changes to the upstream loopback address. It records requests
+and responses without replacing the SDK transport or response parser.
+
+The MCP crate enables `transport-streamable-http-client-reqwest` only as
+a development feature. The `sdk-reqwest` development alias uses the SDK's
+reqwest `0.13` backend, locked to `0.13.5`. Production code keeps the
+workspace reqwest `0.12` dependency. The added client has no TLS features
+because the evaluation uses loopback HTTP only.
+
+Run the normal integration suite:
+
+```powershell
+cargo test -p arcadejanitor-mcp --test http_integration --locked
+```
+
+Result: **passed**, including the default SDK flow and raw contract probes.
+The modern discovery reproducer is explicitly ignored by this command.
+The existing workspace CI command includes the passing tests once per
+platform; no extra CI test step is needed.
+
+Run the unsupported modern flow explicitly:
+
+```powershell
+cargo test -p arcadejanitor-mcp --test http_integration --locked sdk_modern_http_discovery_compatibility -- --ignored --exact --nocapture
+```
+
+Result: **failed**, exit code 101, at modern discovery:
+
+```text
+modern SDK HTTP discovery failed: JSON-RPC error: -32601: method not found
+```
+
+The reproducer prints the actual SDK request, headers, HTTP status, JSON
+response, and server diagnostics. It does not catch the failure and report
+success. If modern support is added later, remove its ignore marker and
+extend it to assert the full modern flow.
+
+On Windows, prefix the same arguments with the Visual C++ wrapper:
+
+```powershell
+& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-mcp', '--test', 'http_integration', '--locked')
+& .\.vscode\Invoke-Cargo.ps1 -CargoCommand test -CargoArgs @('-p', 'arcadejanitor-mcp', '--test', 'http_integration', '--locked', 'sdk_modern_http_discovery_compatibility', '--', '--ignored', '--exact', '--nocapture')
+```
+
+Startup has a 10-second limit. HTTP requests, SDK operations, and client
+close have 5-second limits. The three default token cases have a combined
+60-second limit. All clients disable external proxies. Process guards stop
+and reap the server on success and failure; the observer stops with its
+test scope. Tests preserve all ROM bytes and unrelated files.
+
+### Proposed separate behavior-change issue
+
+**Proposed title:** Define and implement a standard MCP Streamable HTTP contract.
+
+This proposal is not approval to change the server. Before implementation,
+choose whether to support current `2026-07-28`, initialization-era revisions,
+or both. Decide how to retain existing custom HTTP clients: keep their
+contract on a separate route or approve an explicit migration. Decide
+separately whether static token controls remain or OAuth support is required.
+
+The follow-up should require:
+
+- Official SDK discovery or initialization for each selected revision,
+  exact populated tool results, applicable notifications, and bounded close.
+- Required protocol metadata validation, correct unsupported-version and
+  method errors, and HTTP Origin rejection.
+- Clear authorization behavior without changing ROM safety or accepting
+  agent-supplied ROM or metadata source paths.
+- Existing custom HTTP, WebSocket, and stdio regression coverage during
+  migration; release package checks against the agreed supported contract.
+- Passing ordinary CI coverage for each supported SDK lifecycle and
+  updated client installation guidance.
+
+No follow-up issue is filed by this evaluation. The user must approve the
+behavior-change scope first.
+
+## Focused metadata tests
+
 Run the focused metadata tests with:
 
 ```powershell
