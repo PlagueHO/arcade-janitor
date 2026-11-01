@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Made MCP HTTP readiness integration coverage resilient to slower CI runners.
 - Fixed release-test process cleanup on Linux and stopped server children after
   launcher exit on Unix and Windows.
 - Fixed test isolation for mixed-case Windows environment settings and made

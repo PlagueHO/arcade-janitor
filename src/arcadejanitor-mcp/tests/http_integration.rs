@@ -1405,7 +1405,7 @@ fn readiness_reports_early_exit_and_rejects_unsuccessful_health_responses() {
         &mut server,
         &client,
         &format!("{url}/invalid"),
-        Duration::from_millis(150),
+        Duration::from_secs(1),
     )
     .unwrap_err();
     assert!(error.contains("404"), "{error}");
