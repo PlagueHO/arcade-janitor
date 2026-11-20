@@ -50,6 +50,42 @@ GitHub Actions use exact commit pins with release-version comments.
 Update the pin and comment together. The docs pin pnpm in `docs/package.json`;
 local commands and docs CI must use that version.
 
+### Repository rulesets
+
+The default branch follows the automated-check policy used by
+[PlagueHO/beyond-gate](https://github.com/PlagueHO/beyond-gate/rules/27710613).
+Changes require a pull request, resolved review threads, and successful checks
+against an up-to-date base. Human approval is not required. Administrators
+cannot bypass the default-branch rules.
+
+The required GitHub Actions checks are:
+
+| Check | Purpose |
+| --- | --- |
+| `Rust (ubuntu-latest)` | Linux formatting, lint, tests, and build |
+| `Rust (macos-latest)` | macOS formatting, lint, tests, and build |
+| `Rust (windows-latest)` | Windows formatting, lint, tests, and build |
+| `Build Docs` | Frozen docs dependency install and site build |
+| `dependency-policy` | Controlled policy tests, Rust advisories, and licenses |
+| `Analyze (actions)` | GitHub Actions CodeQL analysis |
+| `Analyze (rust)` | Rust CodeQL analysis |
+
+The docs build runs on every pull request without a path filter or deployment.
+This lets its required check report even when a change does not touch docs.
+The existing publication workflow still deploys only from `main` or a manual run.
+Checks specific to beyond-gate's browser integration, JavaScript code, and
+Markdown lint tooling are not copied as nonexistent required checks.
+
+CodeQL blocks errors and security alerts rated high or critical. Copilot reviews
+non-draft pull requests on each push. The default branch cannot be deleted or
+force-pushed. The approved policy does not use a separate `code_quality` rule.
+
+Version tags matching `v*` have two active rulesets. Only repository
+administrators can create them. No actor, including an administrator, can
+update, delete, or force-push an existing version tag.
+These settings live in GitHub, not in the workflow files.
+See GitHub's [ruleset API reference](https://docs.github.com/en/rest/repos/rules).
+
 ### Rust dependency policy
 
 Install PowerShell 7, Git, and Rust 1.95 or later. Windows installation also

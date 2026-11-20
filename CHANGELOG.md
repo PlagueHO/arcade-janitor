@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Aligned GitHub rulesets with beyond-gate's approved automated-check policy.
+  Required docs builds on every pull request and protected version tags.
 - Updated Rust dependencies and the docs dependency lockfile. Pinned current
   GitHub Actions releases and the docs pnpm version.
 - Replaced CLI `chrono` use with maintained `jiff` while preserving local
