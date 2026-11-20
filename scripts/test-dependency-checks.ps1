@@ -223,3 +223,6 @@ finally {
         Remove-Item -LiteralPath $fixture -Recurse -Force
     }
 }
+
+# Reset the caller-visible native exit code only after assertions and cleanup succeed.
+$global:LASTEXITCODE = 0
