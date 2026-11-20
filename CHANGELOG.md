@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fetch dependencies when CI treats build warnings as errors.
 - Removed the unused direct MCP `tokio-stream` dependency and added the policy
   test fixture's build script so strict Cargo builds and dependency checks pass.
+- Made controlled dependency test assertions ignore diagnostic color codes
+  while preserving exit-code and message checks.
 - Reset the controlled dependency tests' native exit code after successful tests
   and cleanup so GitHub Actions does not report an expected failure as a failed step.
 

@@ -24,10 +24,11 @@ function Assert-FixtureCheck {
     }
     $output = & pwsh @arguments 2>&1
     $actual = $LASTEXITCODE
+    $diagnosticText = ($output -join "`n") -replace '\x1B\[[0-9;]*m', ''
     if ($before -ne (Get-FileHash -LiteralPath $lockfile).Hash) {
         throw "$Name changed Cargo.lock."
     }
-    if ($actual -ne $ExitCode -or ($output -join "`n") -notmatch $Diagnostic) {
+    if ($actual -ne $ExitCode -or $diagnosticText -notmatch $Diagnostic) {
         $output | Out-Host
         throw "$Name returned $actual; expected $ExitCode and diagnostic '$Diagnostic'."
     }
