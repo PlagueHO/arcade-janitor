@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removed the unused `indicatif` workspace dependency so Cargo 1.100.0 can
+  fetch dependencies when CI treats build warnings as errors.
 - Reset the controlled dependency tests' native exit code after successful tests
   and cleanup so GitHub Actions does not report an expected failure as a failed step.
 
