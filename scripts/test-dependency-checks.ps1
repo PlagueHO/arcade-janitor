@@ -76,6 +76,7 @@ serde = "=$($serde.Groups[1].Value)"
 "@ + "`n"
     [IO.File]::WriteAllText($manifest, $manifestText)
     [IO.File]::WriteAllText((Join-Path $fixture 'src/lib.rs'), '')
+    [IO.File]::WriteAllText((Join-Path $fixture 'build.rs'), "use policy_build as _;`nfn main() {}`n")
     foreach ($name in @('platform', 'build', 'dev')) {
         [IO.File]::WriteAllText((Join-Path $fixture "$name/Cargo.toml"), @"
 [package]
