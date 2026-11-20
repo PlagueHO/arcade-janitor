@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated Rust dependencies and the docs dependency lockfile. Pinned current
+  GitHub Actions releases and the docs pnpm version.
+- Replaced CLI `chrono` use with maintained `jiff` while preserving local
+  source timestamp text. Added one approved SDK maintenance-advisory exception,
+  limited to the current dependency parents and expiring on 2026-12-20.
+- Added the docs npm project to the monthly Dependabot policy and its separate
+  security-update group.
+
 - Documented the custom MCP HTTP contract, official SDK support limits,
   current specification gaps, and a separate Streamable HTTP migration proposal.
 - Removed duplicate CI integration test runs and enforced the committed Cargo
@@ -22,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   maintenance policy.
 
 ### Added
+
+- Added private vulnerability reporting guidance and a latest-release-only
+  security support policy without fixed response or repair commitments.
+- Added pinned, shared Rust advisory and license checks with full dependency
+  graph coverage, controlled failure tests, and explicit offline freshness limits.
 
 - Added populated official SDK HTTP regression coverage and an explicit
   reproducer for unsupported modern MCP discovery, without changing server behavior.

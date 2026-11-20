@@ -1,0 +1,34 @@
+[graph]
+# An empty target list includes foreign-target dependencies.
+targets = []
+all-features = true
+exclude-dev = false
+exclude-unpublished = false
+
+[advisories]
+db-urls = ["https://github.com/RustSec/advisory-db"]
+maximum-db-staleness = "P7D"
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+unused-ignored-advisory = "deny"
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "rmcp still requires chrono; remove after a compatible released SDK fix. Track https://github.com/PlagueHO/arcade-janitor/issues/41", expiry = "2026-12-20", allow = ["rmcp@3.11.0", "schemars@1.2.3"] },
+]
+
+[licenses]
+include-dev = true
+include-build = true
+confidence-threshold = 0.95
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+]
+exceptions = []
+
+[licenses.private]
+ignore = false

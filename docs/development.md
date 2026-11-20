@@ -18,6 +18,10 @@ to `false` to apply a move or delete.
 
 ## Development environment
 
+For suspected vulnerabilities, use the
+[private reporting route](https://github.com/PlagueHO/arcade-janitor/security/advisories/new).
+See the repository's [security policy](https://github.com/PlagueHO/arcade-janitor/blob/main/SECURITY.md).
+
 The included Dev Container provides a Linux Rust development environment with
 the stable toolchain, `rustfmt`, `clippy`, `rust-src`, GitHub CLI, and the
 recommended VS Code extensions. Open the repository in VS Code and select
@@ -33,6 +37,35 @@ cargo test --workspace --locked
 
 `--locked` makes Cargo fail if `Cargo.lock` is missing or dependency resolution
 would change it. Keep this option for validation against the committed lockfile.
+
+## Dependency policy checks
+
+PowerShell 7 and Git are required. The pinned cargo-deny 0.22.0 installer needs
+Rust 1.95 or later. On Windows, it uses Visual Studio C++ Build Tools through
+the supplied helper. Run from the repository root:
+
+```powershell
+pwsh -NoProfile -File ./scripts/install-dependency-tools.ps1
+pwsh -NoProfile -File ./scripts/check-dependencies.ps1
+pwsh -NoProfile -File ./scripts/check-dependencies.ps1 -Offline
+pwsh -NoProfile -File ./scripts/test-dependency-checks.ps1
+```
+
+Local commands and CI use `deny.toml` and the same exact checker version.
+The full graph includes all features and targets, plus build and test
+dependencies. Normal checks fetch RustSec data and fail on fetch errors.
+Explicit offline checks require cached sources and registry data and reject
+missing advisory data or a database last fetched more than seven days ago.
+Offline checks cannot detect advisories published after that fetch.
+
+See [contributor guidance](https://github.com/PlagueHO/arcade-janitor/blob/main/CONTRIBUTING.md#rust-dependency-policy)
+for license rules, exception approval, controlled tests, and deferred updates.
+The CLI now uses `jiff` for local source modification timestamps.
+The SDK still requires `chrono`. Its unmaintained advisory has one approved
+exception limited to the current `rmcp` and `schemars` parent versions,
+expiring on 2026-12-20. Removal is tracked in
+[#41](https://github.com/PlagueHO/arcade-janitor/issues/41).
+All other advisory and license checks remain active.
 
 ## Integration tests
 
@@ -95,7 +128,8 @@ custom stateless HTTP, not a standard Streamable HTTP implementation.
 
 ### Versions and official sources
 
-The evaluation uses the official Rust SDK `rmcp` `3.8.0` from `Cargo.lock`.
+The original evaluation used the official Rust SDK `rmcp` `3.8.0`.
+The dependency update uses `3.11.0` from `Cargo.lock` and runs the same regressions.
 It knows protocol revisions `2024-11-05`, `2025-03-26`, `2025-06-18`,
 `2025-11-25`, and `2026-07-28`. Its latest version is `2026-07-28`.
 Its default `ServiceExt::serve` still selects the initialization-based
@@ -362,18 +396,19 @@ the vulnerable Vite 5 dependency chain without dependency overrides. Review the
 before the next upgrade. Check the build, navigation, images, theme, and code
 highlighting after an upgrade.
 
-Use Node.js 22.12 or later and pnpm 10, as used in docs CI. From `docs`, run:
+Use Node.js 22.12 or later and pnpm 12.21.0, as pinned in `docs/package.json`
+and used in docs CI. Corepack reads that pin. From `docs`, run:
 
 ```shell
-npm exec --yes --package=pnpm@10 -- pnpm install --frozen-lockfile
-npm exec --yes --package=pnpm@10 -- pnpm build
+npm exec --yes --package=corepack -- corepack pnpm install --frozen-lockfile
+npm exec --yes --package=corepack -- corepack pnpm build
 ```
 
 For local development or a preview of the built site, run one of:
 
 ```shell
-npm exec --yes --package=pnpm@10 -- pnpm dev --host 127.0.0.1
-npm exec --yes --package=pnpm@10 -- pnpm preview --host 127.0.0.1
+npm exec --yes --package=corepack -- corepack pnpm dev --host 127.0.0.1
+npm exec --yes --package=corepack -- corepack pnpm preview --host 127.0.0.1
 ```
 
 Open the printed URL with the `/arcade-janitor/` base path. The build output
