@@ -11,29 +11,6 @@ permissions:
   contents: read
 
 jobs:
-  # Preserve the live required context until the nine-check policy is activated.
-  legacy-dependency-policy:
-    name: dependency-policy
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
-        with:
-          toolchain: stable
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .dependency-tools
-          key: ${{ runner.os }}-dependency-tools-${{ hashFiles('scripts/install-dependency-tools.ps1') }}
-      - run: ./scripts/install-dependency-tools.ps1
-      - run: cargo fetch --locked
-      - run: ./scripts/test-dependency-checks.ps1
-      - run: ./scripts/check-dependencies.ps1
-
   dependency-policy:
     name: dependencies
     runs-on: ubuntu-latest
