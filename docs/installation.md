@@ -4,6 +4,28 @@ Download the package for your operating system from the
 [latest GitHub release](https://github.com/PlagueHO/arcade-janitor/releases/latest).
 Each package contains the `arcadejanitor` CLI and `arcadejanitor-mcp` server.
 
+New packages prepared by the checked draft workflow include a `.sha256` sidecar.
+Download the archive and its matching sidecar. Older releases might not supply
+checksums or provenance. Do not claim those releases passed the new checks.
+
+On Linux, verify the sidecar before extraction with `sha256sum -c <archive>.sha256`.
+On macOS, use `shasum -a 256 -c <archive>.sha256`. On Windows, compare
+`Get-FileHash -Algorithm SHA256 <archive>` with the digest in its sidecar.
+A mismatch means the archive must not be used.
+
+Checksums detect changed bytes but do not establish their origin. Use
+[`gh attestation verify`](https://cli.github.com/manual/gh_attestation_verify)
+to verify signed build provenance:
+
+```shell
+gh attestation verify <archive> --repo PlagueHO/arcade-janitor --signer-workflow PlagueHO/arcade-janitor/.github/workflows/release.yml --source-ref refs/tags/vX.Y.Z --source-digest <release-commit> --signer-digest <release-commit> --deny-self-hosted-runners
+```
+
+Replace the archive, version, and commit with the approved release identity.
+Verify its checksum sidecar with the same command. For retained bundle verification,
+add `--bundle <attestation.json>` from the release's provenance evidence artifact.
+See the [release procedure](./development.md#release-preparation-and-publication).
+
 ## Linux and macOS
 
 Extract the downloaded archive, using `macos` instead of `linux` for the macOS

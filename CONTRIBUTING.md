@@ -52,29 +52,46 @@ local commands and docs CI must use that version.
 
 ### Repository rulesets
 
-The default branch follows the automated-check policy used by
-[PlagueHO/beyond-gate](https://github.com/PlagueHO/beyond-gate/rules/27710613).
+The default branch uses the review model approved in
+[PlagueHO/beyond-gate#39](https://github.com/PlagueHO/beyond-gate/issues/39).
 Changes require a pull request, resolved review threads, and successful checks
-against an up-to-date base. Human approval is not required. Administrators
+against an up-to-date base. GitHub requires zero approving reviews, which lets
+a sole maintainer merge their own checked PR. Human review and an explicit
+maintainer merge request still apply. Administrators
 cannot bypass the default-branch rules.
 
-The required GitHub Actions checks are:
+The proposed required GitHub Actions checks are:
 
 | Check | Purpose |
 | --- | --- |
 | `Rust (ubuntu-latest)` | Linux formatting, lint, tests, and build |
 | `Rust (macos-latest)` | macOS formatting, lint, tests, and build |
 | `Rust (windows-latest)` | Windows formatting, lint, tests, and build |
-| `Build Docs` | Frozen docs dependency install and site build |
-| `dependency-policy` | Controlled policy tests, Rust advisories, and licenses |
+| `site` | Frozen docs dependency install and site build |
+| `markdown` | Documentation style, local links, and controlled link tests |
+| `dependencies` | Controlled policy tests, Rust advisories, and licenses |
 | `Analyze (actions)` | GitHub Actions CodeQL analysis |
+| `Analyze (javascript-typescript)` | VitePress TypeScript configuration and docs tooling |
 | `Analyze (rust)` | Rust CodeQL analysis |
 
-The docs build runs on every pull request without a path filter or deployment.
-This lets its required check report even when a change does not touch docs.
-The existing publication workflow still deploys only from `main` or a manual run.
-Checks specific to beyond-gate's browser integration, JavaScript code, and
-Markdown lint tooling are not copied as nonexistent required checks.
+The user approved these nine source check names for implementation in #40.
+The two source `Synthetic native messaging (..., Windows)` contexts are excluded
+because ArcadeJanitor has no browser native messaging product. No other source
+check is omitted or replaced. Required jobs run on PRs and main pushes without
+path filters. Pages deployment and package validation are not merge requirements.
+
+Live activation is separate. The inspected main ruleset `22311507` still requires
+the three Rust jobs, `Build Docs`, `dependency-policy`, and the actions/Rust
+CodeQL jobs. Main currently reports the reusable docs job as
+`Build Docs / Build Docs`. Do not treat that name as evidence for `Build Docs`.
+Before changing required contexts, verify successful PR and main runs with app
+`15368` (`github-actions`), then obtain explicit approval of the exact payload.
+Do not merge to bypass a pending check or silently retain nonexistent checks.
+
+During this migration, temporary `Build Docs` and `dependency-policy` jobs run
+the same real site and dependency checks on PRs and pushes. They preserve the
+current required contexts without weakening protection or adding empty success
+jobs. Remove them only after the nine-check policy is applied and verified.
 
 CodeQL blocks errors and security alerts rated high or critical. Copilot reviews
 non-draft pull requests on each push. The default branch cannot be deleted or
@@ -85,6 +102,56 @@ administrators can create them. No actor, including an administrator, can
 update, delete, or force-push an existing version tag.
 These settings live in GitHub, not in the workflow files.
 See GitHub's [ruleset API reference](https://docs.github.com/en/rest/repos/rules).
+
+The creation ruleset is `27719254`; the integrity ruleset is `27719237`.
+Both target `refs/tags/v*` with no exclusions. Creation permits administrator
+role `5` with bypass mode `always`. Integrity has explicit `update`, `deletion`,
+and `non_fast_forward` rules and no bypass. Non-`v*` tags are outside this policy.
+Keep these rules separate. The branch-only `update_allows_fetch_and_merge`
+parameter is not required in a tag-rule response.
+
+All other main parameters stay identical to the source: no bypass; active
+default-branch targeting; strict checks; `do_not_enforce_on_create: true`;
+zero approving reviews; resolved threads; no stale dismissal, Code Owner review,
+last-push approval, required reviewers, or extra unattributed-change approval.
+The ruleset allows merge, squash, and rebase. Repository settings remain
+squash-only with auto-merge disabled. Do not widen them. Add no linear-history,
+signed-commit, deployment, merge-queue, or unverified Code Quality requirement.
+
+### Release approval and recovery
+
+The release workflow prepares drafts only after package, checksum, existing-tag,
+and signed provenance verification. PR builds are read-only. Manual runs never
+create releases; only a manual run on the current default branch can attest
+candidate assets. See the [release procedure](docs/development.md#release-preparation-and-publication).
+
+Actions defaults stay read-only with PR-review approval disabled. Package builds
+have `contents: read`. Only the separate provenance job has `actions: read`,
+`id-token: write`, and `attestations: write` with `contents: read`. Only the
+tag-triggered draft job has `contents: write`. No job publishes a release or
+Cargo crate. Pages keeps its existing site and main-only deployment environment.
+
+Future release immutability was disabled at the issue's refreshed baseline.
+Enabling it and updating required checks need separate explicit approval of
+the exact live payloads. Issue creation, plan approval, or existing tag rules
+do not supply this approval. Keep original, proposed, approved, and applied
+settings separate. Save current settings and effective rules before any write.
+Reread each setting immediately before its approved write. Stop on concurrent
+changes, access denial, unsupported rules, or failed writes. Record successful
+writes and partial application, then compare read-back with the approved fields.
+
+Administrators can still edit rules. Users with write access can manage releases;
+these controls do not make publication administrator-only. Once published with
+immutability enabled, assets and the associated tag are locked. Titles, notes,
+latest markers, and pre-release markers remain editable. Correct assets with a
+new version. A rule edit cannot unlock an immutable release.
+
+Emergency recovery needs approval for a narrow temporary rule edit. Record the
+reason and original payload, restore the approved rule, and inspect it again.
+Do not disable all protections or grant permanent bypass. Rollback also needs
+approval and must not overwrite another administrator's changes. Configuration
+inspection does not prove a rejected push, successful merge, or immutable
+publication. Never merge, create/change a tag, or publish as a test.
 
 ### Rust dependency policy
 
