@@ -452,9 +452,9 @@ checksums, native extraction results, version identity, and provenance evidence.
 Obtain explicit publication approval, then publish the existing draft manually.
 Do not use publication to test the policy.
 
-Future release immutability is a separately approved live setting, not a workflow
-permission. The refreshed baseline has it disabled. After activation, publication
-locks assets and the tag. Titles, notes, latest markers, and pre-release markers
+Future release immutability is enabled as a separately approved live setting,
+not a workflow permission. Publication locks assets and the tag.
+Titles, notes, latest markers, and pre-release markers
 remain editable. Use a new version to correct locked assets. Administrators can
 edit rules, and users with write access can manage releases. Neither rulesets nor
 immutability create administrator-only publication permission.

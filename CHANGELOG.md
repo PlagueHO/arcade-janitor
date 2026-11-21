@@ -53,10 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced automatic release publication with verified-tag draft preparation.
   Added read-only PR and manual packaging, checksums, and separate signed
   provenance verification. Publication still needs explicit maintainer approval.
-- Prepared nine genuine source-named merge checks, with documented approval
-  gates for live settings and future release immutability.
-- Kept real legacy documentation and dependency checks during policy migration
-  so existing required contexts do not block checked pull requests.
+- Activated nine genuine source-named merge checks and future release
+  immutability after separate approval and live-setting verification.
 - Displayed the supported systems directly in the `mcp install` command help.
 - Updated installation and usage documentation for downloadable release binaries.
 - Configured MCP servers now use a fixed required ROM folder and shared metadata source settings.
@@ -82,6 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permitted positional argument.
 - Aligned GitHub Actions and Cargo Dependabot updates with the shared monthly
   maintenance policy.
+
+### Removed
+
+- Removed temporary duplicate documentation and dependency jobs after verified
+  protection activation. The required checks remain unchanged.
 
 ### Added
 

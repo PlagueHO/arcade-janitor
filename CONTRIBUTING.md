@@ -60,7 +60,7 @@ a sole maintainer merge their own checked PR. Human review and an explicit
 maintainer merge request still apply. Administrators
 cannot bypass the default-branch rules.
 
-The proposed required GitHub Actions checks are:
+The required GitHub Actions checks are:
 
 | Check | Purpose |
 | --- | --- |
@@ -74,24 +74,21 @@ The proposed required GitHub Actions checks are:
 | `Analyze (javascript-typescript)` | VitePress TypeScript configuration and docs tooling |
 | `Analyze (rust)` | Rust CodeQL analysis |
 
-The user approved these nine source check names for implementation in #40.
+The user approved and activated these nine source check names in #40.
 The two source `Synthetic native messaging (..., Windows)` contexts are excluded
 because ArcadeJanitor has no browser native messaging product. No other source
 check is omitted or replaced. Required jobs run on PRs and main pushes without
 path filters. Pages deployment and package validation are not merge requirements.
 
-Live activation is separate. The inspected main ruleset `22311507` still requires
-the three Rust jobs, `Build Docs`, `dependency-policy`, and the actions/Rust
-CodeQL jobs. Main currently reports the reusable docs job as
-`Build Docs / Build Docs`. Do not treat that name as evidence for `Build Docs`.
-Before changing required contexts, verify successful PR and main runs with app
-`15368` (`github-actions`), then obtain explicit approval of the exact payload.
+Main ruleset `22311507` requires the nine checks above, bound to app `15368`
+(`github-actions`). Successful PR and main runs verified their exact names before
+separately approved activation. Before future required-check changes, verify
+successful PR and main runs, then obtain approval of the exact live request.
 Do not merge to bypass a pending check or silently retain nonexistent checks.
 
-During this migration, temporary `Build Docs` and `dependency-policy` jobs run
-the same real site and dependency checks on PRs and pushes. They preserve the
-current required contexts without weakening protection or adding empty success
-jobs. Remove them only after the nine-check policy is applied and verified.
+The temporary `Build Docs` and `dependency-policy` compatibility jobs were
+removed after activation and effective-rule verification. The genuine `site`,
+`markdown`, and `dependencies` jobs retain their checks.
 
 CodeQL blocks errors and security alerts rated high or critical. Copilot reviews
 non-draft pull requests on each push. The default branch cannot be deleted or
@@ -131,9 +128,11 @@ have `contents: read`. Only the separate provenance job has `actions: read`,
 tag-triggered draft job has `contents: write`. No job publishes a release or
 Cargo crate. Pages keeps its existing site and main-only deployment environment.
 
-Future release immutability was disabled at the issue's refreshed baseline.
-Enabling it and updating required checks need separate explicit approval of
-the exact live payloads. Issue creation, plan approval, or existing tag rules
+Future release immutability is enabled after separate approval and read-back
+verification. Its REST enable operation is `PUT /repos/{owner}/{repo}/immutable-releases`
+with no request body. See the [API reference](https://docs.github.com/rest/repos/repos#enable-immutable-releases).
+Future setting changes need explicit approval of their exact live requests.
+Issue creation, plan approval, or existing tag rules
 do not supply this approval. Keep original, proposed, approved, and applied
 settings separate. Save current settings and effective rules before any write.
 Reread each setting immediately before its approved write. Stop on concurrent
