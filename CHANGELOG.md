@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed the unused `indicatif` workspace dependency so Cargo 1.100.0 can
+  fetch dependencies when CI treats build warnings as errors.
+- Removed the unused direct MCP `tokio-stream` dependency and added the policy
+  test fixture's build script so strict Cargo builds and dependency checks pass.
+- Made controlled dependency test assertions ignore diagnostic color codes
+  while preserving exit-code and message checks.
+- Reset the controlled dependency tests' native exit code after successful tests
+  and cleanup so GitHub Actions does not report an expected failure as a failed step.
+
 ### Changed
+
+- Aligned GitHub rulesets with beyond-gate's approved automated-check policy.
+  Required docs builds on every pull request and protected version tags.
+- Updated Rust dependencies and the docs dependency lockfile. Pinned current
+  GitHub Actions releases and the docs pnpm version.
+- Replaced CLI `chrono` use with maintained `jiff` while preserving local
+  source timestamp text. Added one approved SDK maintenance-advisory exception,
+  limited to the current dependency parents and expiring on 2026-12-20.
+- Added the docs npm project to the monthly Dependabot policy and its separate
+  security-update group.
 
 - Documented the custom MCP HTTP contract, official SDK support limits,
   current specification gaps, and a separate Streamable HTTP migration proposal.
@@ -22,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   maintenance policy.
 
 ### Added
+
+- Added private vulnerability reporting guidance and a latest-release-only
+  security support policy without fixed response or repair commitments.
+- Added pinned, shared Rust advisory and license checks with full dependency
+  graph coverage, controlled failure tests, and explicit offline freshness limits.
 
 - Added populated official SDK HTTP regression coverage and an explicit
   reproducer for unsupported modern MCP discovery, without changing server behavior.

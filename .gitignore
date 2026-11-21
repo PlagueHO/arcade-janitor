@@ -3,6 +3,9 @@
 debug
 target
 
+# Pinned dependency checker installation
+.dependency-tools/
+
 # Node.js dependencies for the documentation site
 docs/node_modules/
 docs/dist/

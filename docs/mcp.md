@@ -56,7 +56,7 @@ A correct bearer token enables destructive tools. An unauthorized
 destructive call returns an MCP tool error, not an HTTP 401 challenge.
 This is a static token control, not MCP OAuth authorization.
 
-The official Rust `rmcp` `3.8.0` HTTP client completes its default
+The official Rust `rmcp` `3.11.0` HTTP client completes its default
 initialization-based flow: initialization, tool discovery, a populated
 read-only call, the initialized notification, and client close. It accepts
 the server's `2024-11-05` response. This measured client result does not

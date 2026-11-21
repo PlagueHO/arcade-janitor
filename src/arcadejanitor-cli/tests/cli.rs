@@ -659,6 +659,29 @@ fn completions_generates_a_shell_script() {
 }
 
 #[test]
+fn source_details_report_a_time_zone_lookup_failure() {
+    let directory = fixture();
+    let mut command = command();
+    let output = command
+        .args(["source", "list", "--output", "json"])
+        .args(source_args(directory.path()))
+        .env("TZ", "ArcadeJanitor/UnknownZone")
+        .output()
+        .unwrap();
+    let details = output_json(&output, 0);
+    for detail in details.as_array().unwrap() {
+        assert_eq!(detail["state"], "unavailable");
+        assert!(detail["modified"].is_null());
+        assert!(
+            detail["origin"]
+                .as_str()
+                .unwrap()
+                .contains("failed to detect the local time zone")
+        );
+    }
+}
+
+#[test]
 fn source_clear_previews_by_default() {
     command()
         .args(["source", "clear", "--target", "mame", "--output", "json"])

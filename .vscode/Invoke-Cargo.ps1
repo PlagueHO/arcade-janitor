@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("build", "test", "run", "package")]
+    [ValidateSet("build", "test", "run", "package", "install")]
     [string] $CargoCommand,
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]

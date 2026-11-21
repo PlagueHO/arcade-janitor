@@ -32,7 +32,6 @@ use arcadejanitor_core::{
     },
     utils::filesystem::list_rom_files,
 };
-use chrono::{DateTime, Local};
 use clap::{
     ColorChoice, CommandFactory, FromArgMatches,
     builder::styling::{AnsiColor, Styles},
@@ -43,6 +42,7 @@ use cli::{
     PresentationOptions, RegionArg, RomCommands, RomStatus, SelectorArgs, SortField,
     SourceCommands, SourceOptions, SourceTarget,
 };
+use jiff::{Timestamp, tz::TimeZone};
 use serde::Serialize;
 use serde_json::json;
 
@@ -1312,14 +1312,25 @@ fn source_details(source: &SourceOptions) -> Vec<SourceDetail> {
 
 fn detail_for_file(source: &str, path: &Path, origin: String) -> SourceDetail {
     match fs::metadata(path) {
-        Ok(metadata) => SourceDetail {
-            source: source.to_string(),
-            state: "available".to_string(),
-            origin,
-            path: Some(path.display().to_string()),
-            size_bytes: Some(metadata.len()),
-            modified: metadata.modified().ok().map(format_modified_date),
-        },
+        Ok(metadata) => {
+            let modified = match metadata
+                .modified()
+                .ok()
+                .map(format_modified_date)
+                .transpose()
+            {
+                Ok(modified) => modified,
+                Err(error) => return unavailable_source(source, error.to_string()),
+            };
+            SourceDetail {
+                source: source.to_string(),
+                state: "available".to_string(),
+                origin,
+                path: Some(path.display().to_string()),
+                size_bytes: Some(metadata.len()),
+                modified,
+            }
+        }
         Err(error) => unavailable_source(source, error.to_string()),
     }
 }
@@ -1335,9 +1346,18 @@ fn unavailable_source(source: &str, error: String) -> SourceDetail {
     }
 }
 
-fn format_modified_date(modified: SystemTime) -> String {
-    let date: DateTime<Local> = modified.into();
-    date.format("%Y-%m-%d %H:%M:%S %Z").to_string()
+fn format_modified_date(modified: SystemTime) -> Result<String> {
+    let time_zone = TimeZone::try_system().context("failed to detect the local time zone")?;
+    format_modified_date_in_zone(modified, time_zone)
+}
+
+fn format_modified_date_in_zone(modified: SystemTime, time_zone: TimeZone) -> Result<String> {
+    let timestamp =
+        Timestamp::try_from(modified).context("failed to convert source modification time")?;
+    let date = timestamp.to_zoned_datetime(time_zone);
+    // Chrono's Local %Z printed the numeric offset, not a zone abbreviation.
+    jiff::fmt::strtime::format("%Y-%m-%d %H:%M:%S %:z", &date)
+        .context("failed to format source modification time")
 }
 
 fn refresh_sources(target: SourceTarget, source: &SourceOptions) -> Result<()> {
@@ -1695,6 +1715,53 @@ mod tests {
         assert_eq!(parse_year_selector("1980").unwrap(), (1980, 1980));
         assert_eq!(parse_year_selector("1980..1985").unwrap(), (1980, 1985));
         assert!(parse_year_selector("1985..1980").is_err());
+    }
+
+    #[test]
+    fn modified_dates_preserve_numeric_offsets_and_whole_seconds() -> Result<()> {
+        let modified = SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(999_999_999);
+        for (seconds, expected) in [
+            (0, "1970-01-01 00:00:00 +00:00"),
+            (46_800, "1970-01-01 13:00:00 +13:00"),
+            (19_800, "1970-01-01 05:30:00 +05:30"),
+            (-19_830, "1969-12-31 18:29:30 -05:30:30"),
+        ] {
+            let zone = jiff::tz::Offset::from_seconds(seconds)?.to_time_zone();
+            assert_eq!(format_modified_date_in_zone(modified, zone)?, expected);
+        }
+        let before_epoch = SystemTime::UNIX_EPOCH - std::time::Duration::from_millis(1);
+        assert_eq!(
+            format_modified_date_in_zone(before_epoch, TimeZone::UTC)?,
+            "1969-12-31 23:59:59 +00:00"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modified_dates_follow_daylight_saving_at_the_file_timestamp() -> Result<()> {
+        let zone = TimeZone::get("Pacific/Auckland")?;
+        for (timestamp, expected) in [
+            ("2026-01-15T00:00:00Z", "2026-01-15 13:00:00 +13:00"),
+            ("2026-07-15T00:00:00Z", "2026-07-15 12:00:00 +12:00"),
+        ] {
+            let modified = SystemTime::try_from(timestamp.parse::<Timestamp>()?)?;
+            assert_eq!(
+                format_modified_date_in_zone(modified, zone.clone())?,
+                expected
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn modified_dates_report_out_of_range_timestamps() {
+        let modified = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(253_402_300_800);
+        let error = format_modified_date_in_zone(modified, TimeZone::UTC).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to convert source modification time")
+        );
     }
 
     #[test]

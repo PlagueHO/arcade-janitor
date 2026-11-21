@@ -57,3 +57,30 @@ updates:
         applies-to: "security-updates"
         patterns:
           - "*"
+  - package-ecosystem: "npm"
+    directory: "/docs"
+    schedule:
+      interval: "monthly"
+      time: "09:00"
+      timezone: "Pacific/Auckland"
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps"
+    labels:
+      - "dependencies"
+    rebase-strategy: "auto"
+    groups:
+      docs-minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      docs-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
