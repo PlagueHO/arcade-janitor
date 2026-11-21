@@ -39,3 +39,26 @@ test('the pinned style checker rejects malformed Markdown', () => {
     rmSync(root, { recursive: true })
   }
 })
+
+test('site directory links require index pages and valid fragments', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'arcadejanitor-index-links-'))
+  try {
+    mkdirSync(path.join(root, 'docs', 'page'), { recursive: true })
+    mkdirSync(path.join(root, 'docs', 'empty'))
+    mkdirSync(path.join(root, 'tests', 'fixtures'), { recursive: true })
+    writeFileSync(path.join(root, 'docs', 'page', 'index.md'), '# Page\n')
+    writeFileSync(path.join(root, 'docs', 'page.md'), '# Sibling\n\n## Missing\n')
+    writeFileSync(path.join(root, 'README.md'), '# Project\n\n[Fixtures](tests/fixtures/)\n')
+    writeFileSync(path.join(root, 'docs', 'index.md'),
+      '# Index\n\n[Page](./page/)\n\n[Heading](./page/#page)\n\n[Sibling](./page#missing)\n\n' +
+      '[Missing heading](./page/#missing)\n\n[Missing page](./empty/)\n\n' +
+      '[Current heading](./#index)\n\n[Missing current heading](./#missing)\n')
+    assert.deepEqual(checkLinks(root, ['README.md', 'docs/index.md']), [
+      'docs/index.md: missing local heading ./page/#missing',
+      'docs/index.md: missing local link ./empty/',
+      'docs/index.md: missing local heading ./#missing',
+    ])
+  } finally {
+    rmSync(root, { recursive: true })
+  }
+})

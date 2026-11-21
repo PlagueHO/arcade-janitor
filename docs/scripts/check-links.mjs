@@ -21,11 +21,13 @@ export function checkLinks(directory, files) {
         const target = !decoded ? source : decoded.startsWith('/')
           ? path.join(directory, 'docs', decoded)
           : path.resolve(path.dirname(source), decoded)
-        const candidates = [target, `${target}.md`, path.join(target, 'index.md')]
+        const candidates = [target, ...(decoded.endsWith('/') ? [] : [`${target}.md`]), path.join(target, 'index.md')]
         if (file.startsWith('docs/') && decoded.startsWith('/')) {
           candidates.push(path.join(directory, 'docs', 'public', decoded))
         }
-        const resolved = candidates.find(existsSync)
+        const resolved = candidates.find(candidate => existsSync(candidate) && statSync(candidate).isFile())
+          ?? (!file.startsWith('docs/') && !fragment && existsSync(target) && statSync(target).isDirectory()
+            ? target : undefined)
         if (!resolved) {
           errors.push(`${file}: missing local link ${url}`)
           continue

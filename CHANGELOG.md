@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed documentation directory links to require index pages and valid heading
+  fragments while preserving repository directory links.
 - Fixed release preparation to reject changed assets, missing checksums, invalid
   package inventories, and incorrect version or signed build identities.
 - Made MCP HTTP readiness integration coverage resilient to slower CI runners.
