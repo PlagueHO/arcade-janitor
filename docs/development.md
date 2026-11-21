@@ -316,7 +316,7 @@ never falls back to build outputs or `PATH`. Missing executables fail the
 test. The package test is ignored during normal workspace tests because
 those tests do not create release archives. The release workflow selects
 the package test explicitly before uploading the archive. A failure on any
-platform blocks publication.
+platform blocks draft preparation.
 
 Build both release executables before creating a local archive:
 
@@ -388,6 +388,79 @@ both a successful tool call and an induced failure after startup. It checks
 that the listener is closed. Failures include captured process diagnostics.
 Workflow cleanup removes the extracted package even when the test fails.
 
+## Release preparation and publication
+
+Release publication needs a separate explicit maintainer approval. The workflow
+does not publish releases or Cargo crates. A workflow run or successful package
+test is not publication approval.
+
+The tag workflow accepts `v*` tags but rejects anything except the exact stable
+`vX.Y.Z` version shared by all workspace packages. It uses locked Cargo metadata.
+Only an administrator can create a version tag. Do not create or change a tag
+as a test. The existing tag must identify the build commit before draft creation.
+
+Each supported platform still supplies the same two executables. The final
+release asset inventory is derived from these three actual archives:
+
+| Platform | Archive | Members |
+| --- | --- | --- |
+| Linux | `arcadejanitor-vX.Y.Z-linux.tar.gz` | `arcadejanitor`, `arcadejanitor-mcp` |
+| macOS | `arcadejanitor-vX.Y.Z-macos.tar.gz` | `arcadejanitor`, `arcadejanitor-mcp` |
+| Windows | `arcadejanitor-vX.Y.Z-windows.zip` | `arcadejanitor.exe`, `arcadejanitor-mcp.exe` |
+
+Each archive has a `.sha256` sidecar. Thus this repository has six release
+assets: three archives and three sidecars. Signed provenance is retained as the
+separate `release-provenance-evidence` workflow artifact, not mixed into that
+inventory. Missing or extra files, wrong member names, non-regular members,
+incorrect checksum filenames, and changed archive bytes fail validation.
+
+Run the controlled asset validation locally:
+
+```powershell
+pwsh -NoProfile -File ./scripts/test-release-checks.ps1
+pwsh -NoProfile -File ./scripts/check-release-assets.ps1 -Directory dist -Identity v0.1.0
+```
+
+The second command requires a complete real asset set for the selected version.
+The controlled tests use only synthetic temporary files. The existing extracted
+package tests still run the actual CLI and MCP server before artifact upload.
+
+PR and manual builds use `vX.Y.Z-candidate.<commit>` names and read-only build
+permissions. Relevant package-source PR changes trigger native package validation;
+these path-filtered package jobs are not required merge checks. PR runs do not
+generate provenance or releases. Manual runs create no releases; only a run on
+the current default branch can generate candidate provenance.
+
+After all native builds pass, a separate job checks the complete inventory and
+attests archives and sidecars with the pinned official
+[`actions/attest`](https://github.com/actions/attest) action. It has only
+`contents: read`, `actions: read`, `id-token: write`, and `attestations: write`.
+It verifies signed evidence against both the retained bundle and the current
+repository's attestation API. Verification binds the SHA-256 bytes, repository,
+release workflow, source ref, source commit, and signer commit. It also tests
+rejection of changed bytes, wrong commit, wrong ref, and wrong workflow.
+This is build provenance, not Windows publisher signing or macOS notarization.
+
+Only a successful version-tag run can reach the draft job. That job has
+`contents: write` only. It rechecks the existing tag, asset inventory, and signed
+provenance, then uses `gh release create` with `--verify-tag` and `--draft`.
+It uses an explicit asset list and changelog notes. A failed or conflicting
+creation stops the job instead of changing an existing release.
+
+Before publication, the maintainer must inspect the draft's complete asset set,
+checksums, native extraction results, version identity, and provenance evidence.
+Obtain explicit publication approval, then publish the existing draft manually.
+Do not use publication to test the policy.
+
+Future release immutability is a separately approved live setting, not a workflow
+permission. The refreshed baseline has it disabled. After activation, publication
+locks assets and the tag. Titles, notes, latest markers, and pre-release markers
+remain editable. Use a new version to correct locked assets. Administrators can
+edit rules, and users with write access can manage releases. Neither rulesets nor
+immutability create administrator-only publication permission.
+See [GitHub immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+and the [approval and recovery procedure](https://github.com/PlagueHO/arcade-janitor/blob/main/CONTRIBUTING.md#release-approval-and-recovery).
+
 ## Documentation site
 
 The site uses VitePress `2.0.0-alpha.21`. This is a prerelease, selected to remove
@@ -401,6 +474,7 @@ and used in docs CI. Corepack reads that pin. From `docs`, run:
 
 ```shell
 npm exec --yes --package=corepack -- corepack pnpm install --frozen-lockfile
+npm exec --yes --package=corepack -- corepack pnpm check
 npm exec --yes --package=corepack -- corepack pnpm build
 ```
 
@@ -413,6 +487,16 @@ npm exec --yes --package=corepack -- corepack pnpm preview --host 127.0.0.1
 
 Open the printed URL with the `/arcade-janitor/` base path. The build output
 remains in `docs/dist`. Use pnpm to update `pnpm-lock.yaml`; do not edit it by hand.
+
+The `markdown` check uses pinned markdownlint-cli2 for repository-root and site
+Markdown. Long command lines, tables, and the VitePress home layout retain their
+existing formatting. Local link checks cover parsed Markdown links, reference
+links, images, and heading fragments. The VitePress build also checks site links.
+External URLs are not fetched by the local-link check. `site` and `markdown`
+run directly on every PR and main push without a path filter. Pages deployment
+stays separate, uses the existing domain and environment, and runs only on main.
+These new required-check names need verified GitHub Actions evidence and separate
+live activation approval before replacing the existing ruleset contexts.
 
 ## Windows prerequisites
 

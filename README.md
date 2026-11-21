@@ -46,6 +46,10 @@ Download the package for your operating system from the
 [latest GitHub release](https://github.com/PlagueHO/arcade-janitor/releases/latest).
 Each package contains the `arcadejanitor` CLI and `arcadejanitor-mcp` server.
 
+For packages from the checked draft workflow, verify the checksum and signed
+provenance before extraction. See the [verification instructions](docs/installation.md).
+Older releases might not include this evidence.
+
 On Linux or macOS, extract the downloaded archive:
 
 ```bash

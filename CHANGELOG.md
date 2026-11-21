@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed release preparation to reject changed assets, missing checksums, invalid
+  package inventories, and incorrect version or signed build identities.
+- Made MCP HTTP readiness integration coverage resilient to slower CI runners.
+- Fixed release-test process cleanup on Linux and stopped server children after
+  launcher exit on Unix and Windows.
+- Fixed test isolation for mixed-case Windows environment settings and made
+  stdio test cleanup wait for the server process after a failure.
+- Fixed parameterless MCP tool calls when clients omit the optional arguments field.
+- Made MCP move and delete tools preview changes by default.
+- Kept diagnostic logs on stderr so they do not mix with CLI or stdio MCP data.
+- Fixed CatVer parsing with the `ini` 2.0 dependency.
+- Fixed stdio MCP installs so missing ROM arguments fail fast instead of generating
+  invalid server commands.
+- Fixed the VS Code build tasks to default to `cargo` while retaining Windows-only
+  PowerShell wrapper execution.
+- Fixed cross-platform CI validation for CLI argument tests.
+- Fixed Windows MCP installation through `.cmd` launchers when the launcher path
+  contains spaces.
+- Fixed the Windows workspace build task by initializing the Visual C++ environment
+  required by native Rust dependencies.
+- Fixed Windows command-script MCP installation by avoiding duplicate quoting
+  when invoking launchers through `cmd.exe`.
+- Fixed non-Windows builds after adding Windows MCP client installation support.
+- Fixed VS Code MCP installation on Windows when the client launcher is installed
+  under a path containing spaces.
+- Fixed Windows MCP client installation when a supported CLI is exposed through a
+  `.cmd` or `.bat` PATH launcher, including Unicode program names and actionable
+  client-specific error messages.
 - Removed the unused `indicatif` workspace dependency so Cargo 1.100.0 can
   fetch dependencies when CI treats build warnings as errors.
 - Removed the unused direct MCP `tokio-stream` dependency and added the policy
@@ -20,6 +48,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replaced automatic release publication with verified-tag draft preparation.
+  Added read-only PR and manual packaging, checksums, and separate signed
+  provenance verification. Publication still needs explicit maintainer approval.
+- Prepared nine genuine source-named merge checks, with documented approval
+  gates for live settings and future release immutability.
+- Kept real legacy documentation and dependency checks during policy migration
+  so existing required contexts do not block checked pull requests.
+- Displayed the supported systems directly in the `mcp install` command help.
+- Updated installation and usage documentation for downloadable release binaries.
+- Configured MCP servers now use a fixed required ROM folder and shared metadata source settings.
+- Added MIT license information to the README.
 - Aligned GitHub rulesets with beyond-gate's approved automated-check policy.
   Required docs builds on every pull request and protected version tags.
 - Updated Rust dependencies and the docs dependency lockfile. Pinned current
@@ -44,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Markdown style and local-link checks and TypeScript CodeQL analysis
+  for the documentation project.
 - Added private vulnerability reporting guidance and a latest-release-only
   security support policy without fixed response or repair commitments.
 - Added pinned, shared Rust advisory and license checks with full dependency
@@ -72,42 +113,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or Claude Code.
 - Added integration coverage for metadata failures, ROM deletion and movement edge cases, and
   CLI error handling.
-
-### Changed
-
-- Displayed the supported systems directly in the `mcp install` command help.
-- Updated installation and usage documentation for downloadable release binaries.
-- Configured MCP servers now use a fixed required ROM folder and shared metadata source settings.
-- Added MIT license information to the README.
-
-### Fixed
-
-- Made MCP HTTP readiness integration coverage resilient to slower CI runners.
-- Fixed release-test process cleanup on Linux and stopped server children after
-  launcher exit on Unix and Windows.
-- Fixed test isolation for mixed-case Windows environment settings and made
-  stdio test cleanup wait for the server process after a failure.
-- Fixed parameterless MCP tool calls when clients omit the optional arguments field.
-- Made MCP move and delete tools preview changes by default.
-- Kept diagnostic logs on stderr so they do not mix with CLI or stdio MCP data.
-- Fixed CatVer parsing with the `ini` 2.0 dependency.
-- Fixed stdio MCP installs so missing ROM arguments fail fast instead of generating
-  invalid server commands.
-- Fixed the VS Code build tasks to default to `cargo` while retaining Windows-only
-  PowerShell wrapper execution.
-- Fixed cross-platform CI validation for CLI argument tests.
-- Fixed Windows MCP installation through `.cmd` launchers when the launcher path
-  contains spaces.
-- Fixed the Windows workspace build task by initializing the Visual C++ environment
-  required by native Rust dependencies.
-- Fixed Windows command-script MCP installation by avoiding duplicate quoting
-  when invoking launchers through `cmd.exe`.
-- Fixed non-Windows builds after adding Windows MCP client installation support.
-- Fixed VS Code MCP installation on Windows when the client launcher is installed
-  under a path containing spaces.
-- Fixed Windows MCP client installation when a supported CLI is exposed through a
-  `.cmd` or `.bat` PATH launcher, including Unicode program names and actionable
-  client-specific error messages.
 
 ### Security
 
