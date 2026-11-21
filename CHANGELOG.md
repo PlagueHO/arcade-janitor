@@ -87,6 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added Markdown style and local-link checks and TypeScript CodeQL analysis
   for the documentation project.
+- Explicitly included the VitePress configuration directory in TypeScript
+  CodeQL analysis.
 - Added private vulnerability reporting guidance and a latest-release-only
   security support policy without fixed response or repair commitments.
 - Added pinned, shared Rust advisory and license checks with full dependency
